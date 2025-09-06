@@ -1,8 +1,0 @@
-flask
-python-docx
-pandas
-deep-translator
-sqlalchemy
-python-dotenv
-gunicorn
-psutil
