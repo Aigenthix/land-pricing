@@ -158,7 +158,14 @@ def main():
     
     # Hardcoded matrix for testing - [district, year, taluka, village, area_value]
     test_data = [
-        ["Thane", "2024-2025", "Ambarnath", "Ambhe", 2.2]  # First test row with area value
+        ["Thane", "2024-2025", "Ambarnath", "Ambhe", 0.5],
+        ["Thane", "2024-2025", "Ambarnath", "Ambhe", 2.2],
+        ["Thane", "2024-2025", "Ambarnath", "Ambhe", 4.9],
+        ["Thane", "2024-2025", "Ambarnath", "Ambhe", 10],
+        ["Thane", "2024-2025", "Ambarnath", "Ambhe", 12],
+        ["Thane", "2024-2025", "Ambarnath", "Ambhe", 13],
+        ["Thane", "2024-2025", "Ambarnath", "Ambhe", 0],
+               # First test row with area value
     ]
     
     scraper = IGRScraper(headless=False)  # Set to True for headless mode
