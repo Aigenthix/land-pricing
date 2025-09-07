@@ -159,50 +159,52 @@
         console.log('Results div found:', resultsDiv);
         
         if (!method1Rate && !method2Rate) {
-            alert('⚠️ No rates available from Method 1 or Method 2. Please run at least one method first.');
-            resultsDiv.innerHTML = '<div style="color: red; font-weight: bold;">⚠️ No rates available from Method 1 or Method 2. Please run at least one method first.</div>';
+            alert('⚠️ No analysis data available. Please run at least one method first.');
+            resultsDiv.innerHTML = '<div style="color: red; font-weight: bold;">⚠️ No analysis data available. Please run at least one method first.</div>';
             return;
         }
 
-        var highestRate = 0;
-        var highestMethod = '';
-        var comparisonHtml = '<h3>Rate Comparison Results:</h3>';
+        var recommendedRate = 0;
+        var sourceMethod = '';
+        var analysisHtml = '<h3>Rate Analysis Summary:</h3>';
 
         if (method1Rate && method2Rate) {
-            comparisonHtml += '<p><strong>Method 1 Rate:</strong> Rs. ' + method1Rate.toFixed(2) + ' per sq. meter</p>';
-            comparisonHtml += '<p><strong>Method 2 Rate:</strong> Rs. ' + method2Rate.toFixed(2) + ' per sq. meter</p>';
+            analysisHtml += '<p><strong>Document Analysis Rate:</strong> Rs. ' + method1Rate.toFixed(2) + ' per sq. meter</p>';
+            analysisHtml += '<p><strong>IGR Database Rate:</strong> Rs. ' + method2Rate.toFixed(2) + ' per sq. meter</p>';
             
             if (method1Rate > method2Rate) {
-                highestRate = method1Rate;
-                highestMethod = 'Method 1 (Document Analysis)';
+                recommendedRate = method1Rate;
+                sourceMethod = 'Document Analysis';
             } else {
-                highestRate = method2Rate;
-                highestMethod = 'Method 2 (IGR Web Scraping)';
+                recommendedRate = method2Rate;
+                sourceMethod = 'IGR Database';
             }
         } else if (method1Rate) {
-            comparisonHtml += '<p><strong>Method 1 Rate:</strong> Rs. ' + method1Rate.toFixed(2) + ' per sq. meter</p>';
-            comparisonHtml += '<p style="color: orange;">Method 2 not used</p>';
-            highestRate = method1Rate;
-            highestMethod = 'Method 1 (Document Analysis)';
+            analysisHtml += '<p><strong>Document Analysis Rate:</strong> Rs. ' + method1Rate.toFixed(2) + ' per sq. meter</p>';
+            analysisHtml += '<p style="color: orange;">IGR Database not analyzed</p>';
+            recommendedRate = method1Rate;
+            sourceMethod = 'Document Analysis';
         } else if (method2Rate) {
-            comparisonHtml += '<p style="color: orange;">Method 1 not used</p>';
-            comparisonHtml += '<p><strong>Method 2 Rate:</strong> Rs. ' + method2Rate.toFixed(2) + ' per sq. meter</p>';
-            highestRate = method2Rate;
-            highestMethod = 'Method 2 (IGR Web Scraping)';
+            analysisHtml += '<p style="color: orange;">Document Analysis not performed</p>';
+            analysisHtml += '<p><strong>IGR Database Rate:</strong> Rs. ' + method2Rate.toFixed(2) + ' per sq. meter</p>';
+            recommendedRate = method2Rate;
+            sourceMethod = 'IGR Database';
         }
 
         // Convert to hectares (1 hectare = 10,000 sq meters)
-        var ratePerHectare = highestRate * 10000;
+        var ratePerHectare = recommendedRate * 10000;
 
-        comparisonHtml += '<hr>';
-        comparisonHtml += '<div style="background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 10px 0;">';
-        comparisonHtml += '<h4 style="color: #28a745; margin-top: 0;">Highest Rate for Negotiation:</h4>';
-        comparisonHtml += '<p><strong>Source:</strong> ' + highestMethod + '</p>';
-        comparisonHtml += '<p><strong>Rate per Square Meter:</strong> Rs. ' + highestRate.toFixed(2) + '</p>';
-        comparisonHtml += '<p><strong>Rate per Hectare:</strong> Rs. ' + ratePerHectare.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '</p>';
-        comparisonHtml += '</div>';
+        analysisHtml += '<hr>';
+        analysisHtml += '<div style="background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 10px 0;">';
+        analysisHtml += '<h4 style="color: #28a745; margin-top: 0;">Recommended Rate:</h4>';
+        analysisHtml += '<p>Based on our analysis, we recommend the following rate for this land:</p>';
+        analysisHtml += '<p><strong>Source:</strong> ' + sourceMethod + '</p>';
+        analysisHtml += '<p><strong>Rate per Square Meter:</strong> Rs. ' + recommendedRate.toFixed(2) + '</p>';
+        analysisHtml += '<p><strong>Rate per Hectare:</strong> Rs. ' + ratePerHectare.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '</p>';
+        analysisHtml += '<p style="font-style: italic; color: #666; margin-top: 10px;">This recommendation is based on comprehensive analysis of available data.</p>';
+        analysisHtml += '</div>';
 
-        resultsDiv.innerHTML = comparisonHtml;
+        resultsDiv.innerHTML = analysisHtml;
     }
     </script>
 <!DOCTYPE html>
@@ -405,7 +407,7 @@
         <div class="tab" style="margin: 0;">
             <button class="tablinks" onclick="openTab(event, 'Method1')">Method 1: Document Analysis</button>
             <button class="tablinks" onclick="openTab(event, 'Method2')">Method 2: IGR Web Scraping</button>
-            <button class="tablinks" onclick="openTab(event, 'Method3')">Method 3: Negotiation</button>
+            <button class="tablinks" onclick="openTab(event, 'Method3')">Recommendation</button>
         </div>
         <!-- Clear Results Button -->
         <a href="/clear_results" style="background-color: #dc3545; color: white; padding: 10px 16px; text-decoration: none; border-radius: 4px; font-size: 14px; white-space: nowrap;">Clear All Results</a>
@@ -494,15 +496,15 @@
     <!-- Method 3 Tab Content -->
     <div id="Method3" class="tabcontent">
         <div class="form-group">
-            <h3>Rate Comparison & Negotiation (दर तुलना आणि वाटाघाटी)</h3>
-            <p>Compare rates from Method 1 and Method 2 to determine the highest value for negotiation purposes.</p>
-            <p>मेथड १ आणि मेथड २ मधील दरांची तुलना करून वाटाघाटीसाठी सर्वोच्च मूल्य निर्धारित करा.</p>
+            <h3>Rate Recommendation (दर शिफारस)</h3>
+            <p>Get our recommended land rate based on the analysis from available methods.</p>
+            <p>उपलब्ध पद्धतींच्या विश्लेषणावर आधारित आमची शिफारस केलेली जमीन दर मिळवा.</p>
         </div>
         <div class="form-group">
-            <button type="button" id="compareRatesButton" onclick="compareRates()">Compare Rates (दरांची तुलना करा)</button>
+            <button type="button" id="compareRatesButton" onclick="compareRates()">Get Recommended Rate (शिफारस केलेला दर मिळवा)</button>
         </div>
         <div class="results" id="method3Results">
-            <!-- Comparison results will appear here -->
+            <!-- Recommendation results will appear here -->
         </div>
     </div>
     <div class="footer-images">
