@@ -234,12 +234,23 @@
         .then(data => {
             console.log('[COLAB] Response from Colab:', data);
             
-            if (data.status === 'success' || !data.status) {
-                statusDiv.innerHTML = 'Successfully uploaded';
+            if (data.status === 'success' && data.calculated_assessment_value) {
+                // Success: populate the assessment value field
+                const assessmentInput = document.getElementById('detectedAssessmentValue');
+                const submitButton = document.getElementById('processButton2');
+                
+                assessmentInput.value = data.calculated_assessment_value;
+                submitButton.disabled = false;
+                submitButton.style.opacity = '1';
+                submitButton.style.cursor = 'pointer';
+                
+                statusDiv.innerHTML = `✅ Assessment value detected: ${data.calculated_assessment_value}`;
                 statusDiv.style.backgroundColor = '#e8f5e8';
                 statusDiv.style.color = '#28a745';
+                
+                console.log('[COLAB] Assessment value set:', data.calculated_assessment_value);
             } else {
-                statusDiv.innerHTML = 'Upload failed: ' + (data.message || 'Unknown error');
+                statusDiv.innerHTML = '❌ Failed to detect assessment value: ' + (data.message || 'Unknown error');
                 statusDiv.style.backgroundColor = '#ffebee';
                 statusDiv.style.color = '#d32f2f';
             }
@@ -530,11 +541,11 @@
                 <input type="file" name="record_file" accept=".jpg,.jpeg,.png,.pdf,.docx" onchange="uploadToColab(this)">
             </div>
             <div class="form-group">
-                <label>Assessment Value (Hectares) - Temporary Input (मूल्यांकन मूल्य (हेक्टर) - तात्पुरते इनपुट)</label>
-                <input type="number" name="area_value" step="0.01" placeholder="e.g., 2.2" required>
+                <label>Detected Assessment Value (शोधलेले मूल्यांकन मूल्य)</label>
+                <input type="number" name="area_value" step="0.01" placeholder="Upload 7/12 record to detect value" readonly id="detectedAssessmentValue">
             </div>
             <div class="form-group">
-                <button type="submit" id="processButton2">Get Land Rate (जमीन दर मिळवा)</button>
+                <button type="submit" id="processButton2" disabled>Get Land Rate (जमीन दर मिळवा)</button>
                 <div id="processingMessage2">Processing... Please wait while we fetch the land rates.<span class="spinner"></span></div>
             </div>
         </form>

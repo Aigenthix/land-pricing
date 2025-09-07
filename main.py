@@ -206,11 +206,50 @@ def upload_file():
             
             print(f"[UPLOAD] Colab response status: {response.status_code}")
             
-            # Return Colab's JSON response directly to client
+            # Process Colab's JSON response and calculate assessment value
             if response.headers.get('content-type', '').startswith('application/json'):
                 colab_data = response.json()
                 print(f"[UPLOAD] Colab response: {colab_data}")
-                return jsonify(colab_data), response.status_code
+                
+                # Calculate assessment value (assessment / total_cultivable_area)
+                try:
+                    assessment = colab_data.get('assessment')
+                    total_cultivable_area = colab_data.get('total_cultivable_area')
+                    
+                    if assessment and total_cultivable_area:
+                        # Handle different formats like '6.25.00' -> convert to float
+                        assessment_val = float(assessment.replace('.', '', assessment.count('.') - 1)) if '.' in assessment else float(assessment)
+                        total_area_val = float(total_cultivable_area.replace('.', '', total_cultivable_area.count('.') - 1)) if '.' in total_cultivable_area else float(total_cultivable_area)
+                        
+                        calculated_assessment = assessment_val / total_area_val
+                        
+                        print(f"[CALCULATION] Assessment: {assessment} -> {assessment_val}")
+                        print(f"[CALCULATION] Total Area: {total_cultivable_area} -> {total_area_val}")
+                        print(f"[CALCULATION] Calculated Assessment Value: {calculated_assessment}")
+                        
+                        # Return enhanced response with calculated value
+                        return jsonify({
+                            "status": "success",
+                            "raw_data": colab_data,
+                            "calculated_assessment_value": round(calculated_assessment, 4),
+                            "assessment": assessment,
+                            "total_cultivable_area": total_cultivable_area
+                        }), response.status_code
+                    else:
+                        return jsonify({
+                            "status": "error",
+                            "message": "Missing assessment or total_cultivable_area in Colab response",
+                            "raw_data": colab_data
+                        }), 400
+                        
+                except (ValueError, ZeroDivisionError) as e:
+                    print(f"[ERROR] Calculation failed: {str(e)}")
+                    return jsonify({
+                        "status": "error",
+                        "message": f"Failed to calculate assessment value: {str(e)}",
+                        "raw_data": colab_data
+                    }), 400
+                    
             else:
                 # If Colab doesn't return JSON, return the text response
                 return jsonify({"status": "success", "response": response.text}), response.status_code
