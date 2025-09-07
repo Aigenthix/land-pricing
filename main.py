@@ -28,6 +28,20 @@ def index():
         return redirect(url_for('login'))
     return render_template('index.html')
 
+@app.route('/clear_results')
+def clear_results():
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    
+    # Clear all method results from session
+    session.pop('method1_result_en', None)
+    session.pop('method1_result_mr', None)
+    session.pop('method1_table', None)
+    session.pop('method2_result', None)
+    session.pop('method2_error', None)
+    
+    return redirect(url_for('index'))
+
 @app.route('/process', methods=['POST'])
 def process():
     if not session.get('logged_in'):
@@ -35,7 +49,34 @@ def process():
     docx_file = request.files['input_file']
     excluded_survey_numbers = request.form['excluded_survey_numbers']
     result_en, result_mr, table = process_data(docx_file.read(), excluded_survey_numbers)
-    return render_template('index.html', result_en=result_en, result_mr=result_mr, table=table.to_html(classes='data', header=True))
+    
+    # Store results in session to prevent form resubmission
+    session['method1_result_en'] = result_en
+    session['method1_result_mr'] = result_mr
+    session['method1_table'] = table.to_html(classes='data', header=True)
+    
+    return redirect(url_for('index_with_method1_results'))
+
+@app.route('/index_method1_results')
+def index_with_method1_results():
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    
+    # Get Method 1 results
+    result_en = session.get('method1_result_en', None)
+    result_mr = session.get('method1_result_mr', None)
+    table = session.get('method1_table', None)
+    
+    # Also get Method 2 results if they exist
+    method2_result = session.get('method2_result', None)
+    method2_error = session.get('method2_error', None)
+    
+    return render_template('index.html', 
+                         result_en=result_en, 
+                         result_mr=result_mr, 
+                         table=table,
+                         method2_result=method2_result, 
+                         method2_error=method2_error)
 
 @app.route('/process_method2', methods=['POST'])
 def process_method2():
@@ -66,10 +107,21 @@ def index_with_results():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     
-    method2_result = session.pop('method2_result', None)
-    method2_error = session.pop('method2_error', None)
+    # Get Method 2 results
+    method2_result = session.get('method2_result', None)
+    method2_error = session.get('method2_error', None)
     
-    return render_template('index.html', method2_result=method2_result, method2_error=method2_error)
+    # Also get Method 1 results if they exist
+    result_en = session.get('method1_result_en', None)
+    result_mr = session.get('method1_result_mr', None)
+    table = session.get('method1_table', None)
+    
+    return render_template('index.html', 
+                         method2_result=method2_result, 
+                         method2_error=method2_error,
+                         result_en=result_en, 
+                         result_mr=result_mr, 
+                         table=table)
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)

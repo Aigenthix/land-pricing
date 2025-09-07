@@ -106,13 +106,105 @@
         // Find and click the appropriate tab button
         var tabButtons = document.getElementsByClassName('tablinks');
         for (var i = 0; i < tabButtons.length; i++) {
-            if ((activeTab === 'Method1' && i === 0) || (activeTab === 'Method2' && i === 1)) {
+            if ((activeTab === 'Method1' && i === 0) || (activeTab === 'Method2' && i === 1) || (activeTab === 'Method3' && i === 2)) {
                 tabButtons[i].click();
                 break;
             }
         }
     });
-</script>
+
+    function compareRates() {
+        console.log('Compare rates function called');
+        
+        // Get Method 1 results (from average text, not table)
+        var method1Rate = null;
+        var method1ResultText = document.querySelector('#Method1 .results p');
+        console.log('Method 1 result text found:', method1ResultText);
+        
+        if (method1ResultText) {
+            // Look for the average rate in the result text like "Rs. 20970.19/- per sq. m."
+            var resultText = method1ResultText.textContent;
+            console.log('Method 1 result text content:', resultText);
+            
+            // Match pattern like "Rs. 20970.19/- per sq. m." or "रु. 20970.19/- प्रती चौ. मी."
+            var rateMatch = resultText.match(/Rs?\.\s*([\d,]+\.?\d*)\/-?\s*per sq\.?\s*m\.?/i) || 
+                           resultText.match(/रु\.\s*([\d,]+\.?\d*)\/-?\s*प्रती चौ\. मी\./);
+            
+            if (rateMatch) {
+                method1Rate = parseFloat(rateMatch[1].replace(/,/g, ''));
+                console.log('Method 1 rate found from text:', method1Rate);
+            }
+        }
+
+        // Get Method 2 results
+        var method2Rate = null;
+        var allParagraphs = document.querySelectorAll('#Method2 .results p');
+        console.log('Method 2 paragraphs found:', allParagraphs.length);
+        
+        for (var i = 0; i < allParagraphs.length; i++) {
+            if (allParagraphs[i].textContent.includes('Rate per Square Meter')) {
+                var rateText = allParagraphs[i].textContent;
+                console.log('Method 2 rate text:', rateText);
+                var rateMatch = rateText.match(/Rs\.\s*([\d,]+\.?\d*)/);
+                if (rateMatch) {
+                    method2Rate = parseFloat(rateMatch[1].replace(/,/g, ''));
+                    console.log('Method 2 rate found:', method2Rate);
+                }
+                break;
+            }
+        }
+
+        // Display results
+        var resultsDiv = document.getElementById('method3Results');
+        console.log('Results div found:', resultsDiv);
+        
+        if (!method1Rate && !method2Rate) {
+            alert('⚠️ No rates available from Method 1 or Method 2. Please run at least one method first.');
+            resultsDiv.innerHTML = '<div style="color: red; font-weight: bold;">⚠️ No rates available from Method 1 or Method 2. Please run at least one method first.</div>';
+            return;
+        }
+
+        var highestRate = 0;
+        var highestMethod = '';
+        var comparisonHtml = '<h3>Rate Comparison Results:</h3>';
+
+        if (method1Rate && method2Rate) {
+            comparisonHtml += '<p><strong>Method 1 Rate:</strong> Rs. ' + method1Rate.toFixed(2) + ' per sq. meter</p>';
+            comparisonHtml += '<p><strong>Method 2 Rate:</strong> Rs. ' + method2Rate.toFixed(2) + ' per sq. meter</p>';
+            
+            if (method1Rate > method2Rate) {
+                highestRate = method1Rate;
+                highestMethod = 'Method 1 (Document Analysis)';
+            } else {
+                highestRate = method2Rate;
+                highestMethod = 'Method 2 (IGR Web Scraping)';
+            }
+        } else if (method1Rate) {
+            comparisonHtml += '<p><strong>Method 1 Rate:</strong> Rs. ' + method1Rate.toFixed(2) + ' per sq. meter</p>';
+            comparisonHtml += '<p style="color: orange;">Method 2 not used</p>';
+            highestRate = method1Rate;
+            highestMethod = 'Method 1 (Document Analysis)';
+        } else if (method2Rate) {
+            comparisonHtml += '<p style="color: orange;">Method 1 not used</p>';
+            comparisonHtml += '<p><strong>Method 2 Rate:</strong> Rs. ' + method2Rate.toFixed(2) + ' per sq. meter</p>';
+            highestRate = method2Rate;
+            highestMethod = 'Method 2 (IGR Web Scraping)';
+        }
+
+        // Convert to hectares (1 hectare = 10,000 sq meters)
+        var ratePerHectare = highestRate * 10000;
+
+        comparisonHtml += '<hr>';
+        comparisonHtml += '<div style="background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 10px 0;">';
+        comparisonHtml += '<h4 style="color: #28a745; margin-top: 0;">Highest Rate for Negotiation:</h4>';
+        comparisonHtml += '<p><strong>Source:</strong> ' + highestMethod + '</p>';
+        comparisonHtml += '<p><strong>Rate per Square Meter:</strong> Rs. ' + highestRate.toFixed(2) + '</p>';
+        comparisonHtml += '<p><strong>Rate per Hectare:</strong> Rs. ' + ratePerHectare.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '</p>';
+        comparisonHtml += '</div>';
+
+        resultsDiv.innerHTML = comparisonHtml;
+    }
+    </script>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -241,18 +333,21 @@
         border: 1px solid #ccc;
         background-color: #f1f1f1;
         margin-bottom: 20px;
+        display: flex;
+        justify-content: center;
+        width: fit-content;
+        margin: 0 auto 20px auto;
     }
     
     .tab button {
         background-color: inherit;
-        float: left;
         border: none;
         outline: none;
         cursor: pointer;
         padding: 14px 16px;
         transition: 0.3s;
-        font-size: 16px;
         font-weight: bold;
+        flex-shrink: 0;
     }
     
     .tab button:hover {
@@ -304,10 +399,16 @@
         <img src="{{ url_for('static', filename='symbol.jpg') }}" alt="चिन्ह" class="right">
         <h1>Land Pricing Tool (जमीन किंमत साधन)</h1>
     </div>
-    <!-- Tab navigation -->
-    <div class="tab">
-        <button class="tablinks" onclick="openTab(event, 'Method1')">Method 1: Document Analysis</button>
-        <button class="tablinks" onclick="openTab(event, 'Method2')">Method 2: IGR Web Scraping</button>
+    <!-- Navigation and Clear Button Container -->
+    <div style="display: flex; justify-content: center; align-items: center; gap: 20px; margin: 20px auto; width: fit-content; padding: 10px; background-color: #f8f9fa; border-radius: 8px;">
+        <!-- Tab navigation -->
+        <div class="tab" style="margin: 0;">
+            <button class="tablinks" onclick="openTab(event, 'Method1')">Method 1: Document Analysis</button>
+            <button class="tablinks" onclick="openTab(event, 'Method2')">Method 2: IGR Web Scraping</button>
+            <button class="tablinks" onclick="openTab(event, 'Method3')">Method 3: Negotiation</button>
+        </div>
+        <!-- Clear Results Button -->
+        <a href="/clear_results" style="background-color: #dc3545; color: white; padding: 10px 16px; text-decoration: none; border-radius: 4px; font-size: 14px; white-space: nowrap;">Clear All Results</a>
     </div>
 
     <!-- Method 1 Tab Content -->
@@ -387,6 +488,21 @@
             {% if method2_error %}
                 <p style="color: red;">Error: {{ method2_error }}</p>
             {% endif %}
+        </div>
+    </div>
+
+    <!-- Method 3 Tab Content -->
+    <div id="Method3" class="tabcontent">
+        <div class="form-group">
+            <h3>Rate Comparison & Negotiation (दर तुलना आणि वाटाघाटी)</h3>
+            <p>Compare rates from Method 1 and Method 2 to determine the highest value for negotiation purposes.</p>
+            <p>मेथड १ आणि मेथड २ मधील दरांची तुलना करून वाटाघाटीसाठी सर्वोच्च मूल्य निर्धारित करा.</p>
+        </div>
+        <div class="form-group">
+            <button type="button" id="compareRatesButton" onclick="compareRates()">Compare Rates (दरांची तुलना करा)</button>
+        </div>
+        <div class="results" id="method3Results">
+            <!-- Comparison results will appear here -->
         </div>
     </div>
     <div class="footer-images">

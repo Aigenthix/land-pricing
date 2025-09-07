@@ -1,7 +1,33 @@
-from playwright.sync_api import sync_playwright
 import time
-import re
+from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
+import re
+import atexit
+
+# Thread-local browser instances to avoid greenlet switching issues
+import threading
+_thread_local = threading.local()
+
+def get_browser_instance():
+    """Get or create thread-local browser instance"""
+    if not hasattr(_thread_local, 'browser_instance'):
+        print("Initializing browser for current thread...")
+        try:
+            playwright = sync_playwright().start()
+            browser = playwright.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-extensions']
+            )
+            _thread_local.browser_instance = {
+                'playwright': playwright,
+                'browser': browser
+            }
+            print("Browser initialization complete for thread!")
+        except Exception as e:
+            print(f"Failed to initialize browser: {e}")
+            _thread_local.browser_instance = None
+    
+    return _thread_local.browser_instance
 
 class IGRScraper:
     def __init__(self, headless=True):
@@ -13,16 +39,21 @@ class IGRScraper:
         self.page = None
     
     def start_browser(self):
-        """Start the browser session"""
-        self.playwright = sync_playwright().start()
-        self.browser = self.playwright.chromium.launch(
-            headless=self.headless,
-            args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-extensions']
-        )
-        self.page = self.browser.new_page()
+        """Start the browser session using thread-local instance"""
+        browser_instance = get_browser_instance()
         
-        # Set reasonable timeout for dynamic content
-        self.page.set_default_timeout(20000)
+        if browser_instance is not None:
+            print("Using thread-local browser instance...")
+            self.playwright = browser_instance['playwright']
+            self.browser = browser_instance['browser']
+            
+            # Always create a new page for each scraping session
+            self.page = self.browser.new_page()
+            
+            # Set reasonable timeout for dynamic content
+            self.page.set_default_timeout(20000)
+        else:
+            raise Exception("Failed to initialize browser")
     
     def parse_rate_from_table(self, table_html, area_value):
         """Parse the table and find the rate for the given area value"""
@@ -168,14 +199,12 @@ class IGRScraper:
             print(f"Error during scraping: {str(e)}")
             return {"error": str(e)}
     
-    def close(self):
-        """Close the browser and playwright"""
+    def close_browser(self):
+        """Close only the page, keep browser running"""
         if self.page:
             self.page.close()
-        if self.browser:
-            self.browser.close()
-        if self.playwright:
-            self.playwright.stop()
+            self.page = None
+    
 
 def get_land_rate(district, year, taluka, village, area_value):
     """
@@ -192,4 +221,4 @@ def get_land_rate(district, year, taluka, village, area_value):
     except Exception as e:
         return {"error": str(e)}
     finally:
-        scraper.close()
+        scraper.close_browser()
