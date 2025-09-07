@@ -34,6 +34,17 @@
         document.getElementById('processingMessage').style.display = 'block';
     }
 
+    // Function to show processing message for method 2
+    function showProcessingMethod2() {
+        document.getElementById('processButton2').disabled = true;
+        document.getElementById('processingMessage2').style.display = 'block';
+        // Hide any previous results
+        const resultsDiv = document.querySelector('#Method2 .results');
+        if (resultsDiv) {
+            resultsDiv.style.display = 'none';
+        }
+    }
+
     // Function to download table as CSV
     function downloadCSV() {
         const table = document.querySelector('table.data');
@@ -58,6 +69,49 @@
         link.click();
         document.body.removeChild(link);
     }
+
+    // Tab switching functionality
+    function openTab(evt, tabName) {
+        var i, tabcontent, tablinks;
+        tabcontent = document.getElementsByClassName("tabcontent");
+        for (i = 0; i < tabcontent.length; i++) {
+            tabcontent[i].style.display = "none";
+        }
+        tablinks = document.getElementsByClassName("tablinks");
+        for (i = 0; i < tablinks.length; i++) {
+            tablinks[i].className = tablinks[i].className.replace(" active", "");
+        }
+        document.getElementById(tabName).style.display = "block";
+        evt.currentTarget.className += " active";
+        
+        // Store active tab in localStorage
+        localStorage.setItem('activeTab', tabName);
+    }
+    
+    // Show appropriate tab on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        var activeTab = localStorage.getItem('activeTab');
+        var hasMethod2Results = document.querySelector('#Method2 .results p');
+        
+        // If there are Method 2 results, show Method 2 tab
+        if (hasMethod2Results) {
+            activeTab = 'Method2';
+        }
+        
+        // Default to Method 1 if no stored tab
+        if (!activeTab) {
+            activeTab = 'Method1';
+        }
+        
+        // Find and click the appropriate tab button
+        var tabButtons = document.getElementsByClassName('tablinks');
+        for (var i = 0; i < tabButtons.length; i++) {
+            if ((activeTab === 'Method1' && i === 0) || (activeTab === 'Method2' && i === 1)) {
+                tabButtons[i].click();
+                break;
+            }
+        }
+    });
 </script>
 <!DOCTYPE html>
 <html lang="en">
@@ -160,7 +214,7 @@
         border-radius: 5px;
         cursor: pointer;
         margin-top: 10px;
-        display: {% if table %}block{% else %}none{% endif %};
+        display: none;
     }
     .download-btn:hover {
         background-color: #0056b3;
@@ -180,6 +234,67 @@
         color: #333;
         text-align: center;
     }
+    
+    /* Tab styling */
+    .tab {
+        overflow: hidden;
+        border: 1px solid #ccc;
+        background-color: #f1f1f1;
+        margin-bottom: 20px;
+    }
+    
+    .tab button {
+        background-color: inherit;
+        float: left;
+        border: none;
+        outline: none;
+        cursor: pointer;
+        padding: 14px 16px;
+        transition: 0.3s;
+        font-size: 16px;
+        font-weight: bold;
+    }
+    
+    .tab button:hover {
+        background-color: #ddd;
+    }
+    
+    .tab button.active {
+        background-color: #28a745;
+        color: white;
+    }
+    
+    .tabcontent {
+        display: none;
+        padding: 20px;
+        border: 1px solid #ccc;
+        border-top: none;
+        background-color: white;
+    }
+    
+    /* Loading spinner */
+    .spinner {
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #28a745;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        animation: spin 1s linear infinite;
+        display: inline-block;
+        margin-left: 10px;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    #processingMessage2 {
+        display: none;
+        color: rgb(16, 21, 18);
+        margin-top: 10px;
+        font-weight: bold;
+    }
 </style>
 </head>
 <body>
@@ -189,27 +304,90 @@
         <img src="{{ url_for('static', filename='symbol.jpg') }}" alt="चिन्ह" class="right">
         <h1>Land Pricing Tool (जमीन किंमत साधन)</h1>
     </div>
-    <form method="POST" action="/process" enctype="multipart/form-data" onsubmit="showProcessing()">
-        <div class="form-group">
-            <label>Upload Word Document (.docx) (वर्ड डॉक्युमेंट (.docx) अपलोड करा)</label>
-            <input type="file" name="input_file" accept=".docx" required>
+    <!-- Tab navigation -->
+    <div class="tab">
+        <button class="tablinks" onclick="openTab(event, 'Method1')">Method 1: Document Analysis</button>
+        <button class="tablinks" onclick="openTab(event, 'Method2')">Method 2: IGR Web Scraping</button>
+    </div>
+
+    <!-- Method 1 Tab Content -->
+    <div id="Method1" class="tabcontent">
+        <form method="POST" action="/process" enctype="multipart/form-data" onsubmit="showProcessing()">
+            <div class="form-group">
+                <label>Upload Word Document (.docx) (वर्ड डॉक्युमेंट (.docx) अपलोड करा)</label>
+                <input type="file" name="input_file" accept=".docx" required>
+            </div>
+            <div class="form-group">
+                <label>Exclude Survey Numbers (comma-separated) (सर्वेक्षण क्रमांक वगळा (स्वल्पविरामाने विभक्त केलेले))</label>
+                <input type="text" name="excluded_survey_numbers" placeholder="e.g., 196, 172">
+            </div>
+            <div class="form-group">
+                <button type="submit" id="processButton">Process Table (प्रक्रिया सारणी)</button>
+                <div id="processingMessage">Processing... Please wait for 1-2 minutes to get the table.</div>
+            </div>
+        </form>
+        <div class="results">
+            <p>{{ result_en }}</p>
+            <p>{{ result_mr }}</p>
+            {% if table %}
+                {{ table | safe }}
+                <button class="download-btn" onclick="downloadCSV()" style="display: block;">Download Table as CSV</button>
+            {% endif %}
         </div>
-        <div class="form-group">
-            <label>Exclude Survey Numbers (comma-separated) (सर्वेक्षण क्रमांक वगळा (स्वल्पविरामाने विभक्त केलेले))</label>
-            <input type="text" name="excluded_survey_numbers" placeholder="e.g., 196, 172">
+    </div>
+
+    <!-- Method 2 Tab Content -->
+    <div id="Method2" class="tabcontent">
+        <form method="POST" action="/process_method2" enctype="multipart/form-data" onsubmit="showProcessingMethod2()">
+            <div class="form-group">
+                <label>District (जिल्हा)</label>
+                <input type="text" name="district" placeholder="e.g., Thane" required>
+            </div>
+            <div class="form-group">
+                <label>Year (वर्ष)</label>
+                <select name="year" required>
+                    <option value="">Select Year</option>
+                    <option value="2025-2026">2025-2026</option>
+                    <option value="2024-2025">2024-2025</option>
+                    <option value="2023-2024">2023-2024</option>
+                    <option value="2022-2023">2022-2023</option>
+                    <option value="2021-2022">2021-2022</option>
+                    <option value="2020-2021">2020-2021</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Taluka (तालुका)</label>
+                <input type="text" name="taluka" placeholder="e.g., Ambarnath" required>
+            </div>
+            <div class="form-group">
+                <label>Village (गाव)</label>
+                <input type="text" name="village" placeholder="e.g., Ambhe" required>
+            </div>
+            <div class="form-group">
+                <label>Upload 7/12 Record of Right (७/१२ अधिकार अभिलेख)</label>
+                <input type="file" name="record_file" accept=".jpg,.jpeg,.png,.pdf,.docx">
+            </div>
+            <div class="form-group">
+                <label>Assessment Value (Hectares) - Temporary Input (मूल्यांकन मूल्य (हेक्टर) - तात्पुरते इनपुट)</label>
+                <input type="number" name="area_value" step="0.01" placeholder="e.g., 2.2" required>
+            </div>
+            <div class="form-group">
+                <button type="submit" id="processButton2">Get Land Rate (जमीन दर मिळवा)</button>
+                <div id="processingMessage2">Processing... Please wait while we fetch the land rates.<span class="spinner"></span></div>
+            </div>
+        </form>
+        <div class="results">
+            {% if method2_result %}
+                <h3>Land Rate Results:</h3>
+                <p><strong>Assessment Value:</strong> {{ method2_result.area_value }}</p>
+                <p><strong>Assessment Range:</strong> {{ method2_result.range }}</p>
+                <p><strong>Rate per Hectare:</strong> Rs. {{ method2_result.rate_hectares | round(2) }}</p>
+                <p><strong>Rate per Square Meter:</strong> Rs. {{ method2_result.rate_sqm | round(2) }}</p>
+            {% endif %}
+            {% if method2_error %}
+                <p style="color: red;">Error: {{ method2_error }}</p>
+            {% endif %}
         </div>
-        <div class="form-group">
-            <button type="submit" id="processButton">Process Table (प्रक्रिया सारणी)</button>
-            <div id="processingMessage">Processing... Please wait for 1-2 minutes to get the table.</div>
-        </div>
-    </form>
-    <div class="results">
-        <p>{{ result_en }}</p>
-        <p>{{ result_mr }}</p>
-        {% if table %}
-            {{ table | safe }}
-            <button class="download-btn" onclick="downloadCSV()">Download Table as CSV</button>
-        {% endif %}
     </div>
     <div class="footer-images">
         <img src="{{ url_for('static', filename='dep.jpg') }}" alt="Department Logo">
