@@ -1,11 +1,12 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 import os
-import requests
 from dotenv import load_dotenv
 from method1 import process_data
 from method2 import get_land_rate
 import threading
 import time
+import tempfile
+from Fin_plsplspls import RobustLandRecordOCRDocTR
 
 load_dotenv()
 
@@ -15,11 +16,20 @@ latest_value = {"val": None}
 # Global variable to track processing status
 processing_status = {"image_processing": False, "scraping_progress": {}}
 
-# Colab URL for file processing (replace <colab-ngrok-url> with actual ngrok URL)
-COLAB_URL = "https://b1ef6ad913b3.ngrok-free.app/process"
+# Initialize OCR processor globally
+ocr_processor = None
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'your-secret-key-here')
+
+def initialize_ocr():
+    """Initialize OCR processor on first use"""
+    global ocr_processor
+    if ocr_processor is None:
+        print("Initializing OCR processor...")
+        ocr_processor = RobustLandRecordOCRDocTR()
+        print("OCR processor initialized successfully!")
+    return ocr_processor
 
 @app.route('/')
 def login():
@@ -70,7 +80,8 @@ def clear_results():
 @app.route('/process', methods=['POST'])
 def process():
     if not session.get('logged_in'):
-        return redirect(url_for('login'))
+        return jsonify({"status": "error", "message": "Not logged in"}), 401
+    
     docx_file = request.files['input_file']
     excluded_survey_numbers = request.form['excluded_survey_numbers']
     result_en, result_mr, table = process_data(docx_file.read(), excluded_survey_numbers)
@@ -80,7 +91,12 @@ def process():
     session['method1_result_mr'] = result_mr
     session['method1_table'] = table.to_html(classes='data', header=True)
     
-    return redirect(url_for('index'))
+    return jsonify({
+        "status": "success",
+        "result_en": result_en,
+        "result_mr": result_mr,
+        "table": table.to_html(classes='data', header=True)
+    })
 
 @app.route('/index_method1_results')
 def index_with_method1_results():
@@ -125,7 +141,7 @@ def get_scraping_progress():
 @app.route('/process_method2', methods=['POST'])
 def process_method2():
     if not session.get('logged_in'):
-        return redirect(url_for('login'))
+        return jsonify({"status": "error", "message": "Not logged in"}), 401
     
     # Check if image is still being processed
     if processing_status["image_processing"]:
@@ -154,11 +170,11 @@ def process_method2():
     if 'error' in result:
         session['method2_error'] = result['error']
         session.pop('method2_result', None)
+        return jsonify({"status": "error", "message": result['error']})
     else:
         session['method2_result'] = result
         session.pop('method2_error', None)
-    
-    return redirect(url_for('index'))
+        return jsonify({"status": "success", "result": result})
 
 def get_land_rate_with_progress(district, year, taluka, village, area_value, session_id):
     """Wrapper function to track progress during scraping"""
@@ -323,7 +339,7 @@ def get_value():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """POST endpoint to upload files and forward them to Colab for processing"""
+    """POST endpoint to upload files and process them locally using OCR"""
     
     try:
         # Check if file exists in request
@@ -349,80 +365,80 @@ def upload_file():
             # Set image processing flag
             processing_status["image_processing"] = True
             
-            # Prepare file for forwarding
-            file.stream.seek(0)  # Reset stream position
-            files = {"file": (file.filename, file.stream, file.mimetype)}
+            # Save uploaded file to temporary location
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_extension}') as temp_file:
+                file.save(temp_file.name)
+                temp_file_path = temp_file.name
             
-            print(f"[UPLOAD] Forwarding file to Colab: {COLAB_URL}")
+            print(f"[OCR] Processing image locally: {temp_file_path}")
             
-            # Send POST request to Colab
-            response = requests.post(COLAB_URL, files=files, timeout=60)
+            # Initialize OCR processor and process image
+            ocr = initialize_ocr()
+            ocr_results = ocr.process_image(temp_file_path)
             
-            print(f"[UPLOAD] Colab response status: {response.status_code}")
+            # Clean up temporary file
+            os.unlink(temp_file_path)
             
-            # Process Colab's JSON response and calculate assessment value
-            if response.headers.get('content-type', '').startswith('application/json'):
-                colab_data = response.json()
-                print(f"[UPLOAD] Colab response: {colab_data}")
+            print(f"[OCR] Local OCR results: {ocr_results}")
+            
+            # Calculate assessment value (assessment / total_cultivable_area)
+            try:
+                assessment = ocr_results.get('assessment')
+                total_cultivable_area = ocr_results.get('total_cultivable_area')
                 
-                # Calculate assessment value (assessment / total_cultivable_area)
-                try:
-                    assessment = colab_data.get('assessment')
-                    total_cultivable_area = colab_data.get('total_cultivable_area')
+                if assessment and total_cultivable_area:
+                    # Handle different formats like '6.25.00' -> 6.25 or '0.02.00' -> 0.02
+                    assessment_val = float(assessment)
                     
-                    if assessment and total_cultivable_area:
-                        # Handle different formats like '6.25.00' -> 6.25 or '0.02.00' -> 0.02
-                        assessment_val = float(assessment)
-                        
-                        # For total_cultivable_area, handle formats like '0.02.00' -> 0.02
-                        if total_cultivable_area.count('.') > 1:
-                            # Split by dots and take first two parts: '0.02.00' -> '0.02'
-                            parts = total_cultivable_area.split('.')
-                            total_area_val = float(f"{parts[0]}.{parts[1]}")
-                        else:
-                            total_area_val = float(total_cultivable_area)
-                        
-                        calculated_assessment = assessment_val / total_area_val
-                        
-                        print(f"[CALCULATION] Assessment: {assessment} -> {assessment_val}")
-                        print(f"[CALCULATION] Total Area: {total_cultivable_area} -> {total_area_val}")
-                        print(f"[CALCULATION] Calculated Assessment Value: {calculated_assessment}")
-                        
-                        # Clear image processing flag
-                        processing_status["image_processing"] = False
-                        
-                        # Return enhanced response with calculated value
-                        return jsonify({
-                            "status": "success",
-                            "raw_data": colab_data,
-                            "calculated_assessment_value": round(calculated_assessment, 4),
-                            "assessment": assessment,
-                            "total_cultivable_area": total_cultivable_area
-                        }), response.status_code
+                    # For total_cultivable_area, handle formats like '0.02.00' -> 0.02
+                    if total_cultivable_area.count('.') > 1:
+                        # Split by dots and take first two parts: '0.02.00' -> '0.02'
+                        parts = total_cultivable_area.split('.')
+                        total_area_val = float(f"{parts[0]}.{parts[1]}")
                     else:
-                        return jsonify({
-                            "status": "error",
-                            "message": "Missing assessment or total_cultivable_area in Colab response",
-                            "raw_data": colab_data
-                        }), 400
-                        
-                except (ValueError, ZeroDivisionError) as e:
-                    print(f"[ERROR] Calculation failed: {str(e)}")
+                        total_area_val = float(total_cultivable_area)
+                    
+                    calculated_assessment = assessment_val / total_area_val
+                    
+                    print(f"[CALCULATION] Assessment: {assessment} -> {assessment_val}")
+                    print(f"[CALCULATION] Total Area: {total_cultivable_area} -> {total_area_val}")
+                    print(f"[CALCULATION] Calculated Assessment Value: {calculated_assessment}")
+                    
+                    # Clear image processing flag
+                    processing_status["image_processing"] = False
+                    
+                    # Return enhanced response with calculated value
+                    return jsonify({
+                        "status": "success",
+                        "raw_data": ocr_results,
+                        "calculated_assessment_value": round(calculated_assessment, 4),
+                        "assessment": assessment,
+                        "total_cultivable_area": total_cultivable_area
+                    }), 200
+                else:
+                    processing_status["image_processing"] = False
                     return jsonify({
                         "status": "error",
-                        "message": f"Failed to calculate assessment value: {str(e)}",
-                        "raw_data": colab_data
+                        "message": "Missing assessment or total_cultivable_area in OCR results",
+                        "raw_data": ocr_results
                     }), 400
                     
-            else:
-                # If Colab doesn't return JSON, return the text response
-                return jsonify({"status": "success", "response": response.text}), response.status_code
+            except (ValueError, ZeroDivisionError) as e:
+                processing_status["image_processing"] = False
+                print(f"[ERROR] Calculation failed: {str(e)}")
+                return jsonify({
+                    "status": "error",
+                    "message": f"Failed to calculate assessment value: {str(e)}",
+                    "raw_data": ocr_results
+                }), 400
                 
-        except requests.exceptions.RequestException as e:
-            print(f"[ERROR] Failed to forward file to Colab: {str(e)}")
-            return jsonify({"status": "error", "message": f"Failed to connect to Colab: {str(e)}"}), 500
+        except Exception as e:
+            processing_status["image_processing"] = False
+            print(f"[ERROR] Local OCR processing failed: {str(e)}")
+            return jsonify({"status": "error", "message": f"OCR processing failed: {str(e)}"}), 500
         
     except Exception as e:
+        processing_status["image_processing"] = False
         print(f"[ERROR] File upload processing failed: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 

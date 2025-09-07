@@ -65,7 +65,6 @@
     }
     
     function trackScrapingProgress(sessionId) {
-        const steps = ['step1', 'step2', 'step3', 'step4', 'step5', 'step6'];
         let currentStep = 0;
         
         console.log('[PROGRESS] Starting progress tracking...');
@@ -76,24 +75,24 @@
             .then(data => {
                 console.log('[PROGRESS] Received:', data);
                 
-                if (data.step > currentStep) {
-                    // Mark previous steps as completed
-                    for (let i = 0; i < data.step - 1; i++) {
-                        const prevStep = document.getElementById(steps[i]);
-                        if (prevStep) {
-                            prevStep.classList.remove('active');
-                            prevStep.classList.add('completed');
-                            console.log(`[PROGRESS] Completed step ${i + 1}`);
-                        }
-                    }
+                if (data.step > currentStep || data.message) {
+                    // Update the single current step element with the message
+                    const stepTextElement = document.getElementById('stepText');
+                    const spinnerElement = document.getElementById('progressSpinner');
+                    const currentStepElement = document.getElementById('currentStep');
                     
-                    // Activate current step
-                    if (data.step <= steps.length && data.step > 0) {
-                        const activeStep = document.getElementById(steps[data.step - 1]);
-                        if (activeStep) {
-                            activeStep.classList.add('active');
-                            console.log(`[PROGRESS] Activated step ${data.step}`);
+                    if (stepTextElement && data.message) {
+                        stepTextElement.textContent = data.message;
+                        currentStepElement.classList.add('active');
+                        
+                        // Show spinner for all steps except completion
+                        if (data.step < 6 && !data.message.includes('complete')) {
+                            spinnerElement.classList.remove('hidden');
+                        } else {
+                            spinnerElement.classList.add('hidden');
                         }
+                        
+                        console.log(`[PROGRESS] Updated step: ${data.message}`);
                     }
                     
                     currentStep = data.step;
@@ -102,10 +101,12 @@
                     if (data.step >= 6) {
                         clearInterval(progressInterval);
                         setTimeout(() => {
-                            const lastStep = document.getElementById(steps[5]);
-                            if (lastStep) {
-                                lastStep.classList.remove('active');
-                                lastStep.classList.add('completed');
+                            const currentStepElement = document.getElementById('currentStep');
+                            const spinnerElement = document.getElementById('progressSpinner');
+                            if (currentStepElement) {
+                                currentStepElement.classList.remove('active');
+                                currentStepElement.classList.add('completed');
+                                spinnerElement.classList.add('hidden'); // Hide spinner on completion
                                 console.log('[PROGRESS] All steps completed');
                             }
                         }, 1000);
@@ -148,6 +149,121 @@
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+    }
+
+    // AJAX form submission for Method 1
+    function submitMethod1(event) {
+        event.preventDefault();
+        
+        const form = document.getElementById('method1Form');
+        const formData = new FormData(form);
+        const processButton = document.getElementById('processButton');
+        const processingMessage = document.getElementById('processingMessage');
+        
+        // Show processing state
+        processButton.disabled = true;
+        processingMessage.style.display = 'block';
+        
+        fetch('/process', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                // Update results in the current tab without redirecting
+                const resultsDiv = document.querySelector('#Method1 .results');
+                resultsDiv.innerHTML = `
+                    ${data.result_en ? `<p>${data.result_en}</p>` : ''}
+                    ${data.result_mr ? `<p>${data.result_mr}</p>` : ''}
+                    ${data.table ? `${data.table}<button class="download-btn" onclick="downloadCSV()" style="display: block;">Download Table as CSV</button>` : ''}
+                `;
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while processing the document.');
+        })
+        .finally(() => {
+            // Reset form state
+            processButton.disabled = false;
+            processingMessage.style.display = 'none';
+        });
+    }
+
+    // AJAX form submission for Method 2
+    function submitMethod2(event) {
+        event.preventDefault();
+        
+        // Check if image is still processing before allowing submission
+        fetch('/check_processing_status')
+        .then(response => response.json())
+        .then(data => {
+            if (data.image_processing) {
+                alert('Image is still being processed. Please wait for the assessment value to be detected.');
+                return;
+            }
+            
+            const form = document.getElementById('method2Form');
+            const formData = new FormData(form);
+            
+            // Show progress tracking
+            const progressSteps = document.getElementById('progressSteps');
+            progressSteps.style.display = 'block';
+            document.getElementById('processingMessage2').style.display = 'block';
+            
+            // Start real-time progress tracking
+            trackScrapingProgress();
+            
+            // Hide any previous results
+            const resultsDiv = document.querySelector('#Method2 .results');
+            if (resultsDiv) {
+                resultsDiv.style.display = 'none';
+            }
+            
+            // Submit form via AJAX
+            fetch('/process_method2', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide progress tracking
+                progressSteps.style.display = 'none';
+                document.getElementById('processingMessage2').style.display = 'none';
+                
+                if (data.status === 'success') {
+                    // Update results in the current tab without redirecting
+                    const result = data.result;
+                    resultsDiv.innerHTML = `
+                        <h3>Land Rate Results:</h3>
+                        <p><strong>Assessment Range:</strong> ${result.range}</p>
+                        <p><strong>Rate per Hectare:</strong> ₹${result.rate_hectares}</p>
+                        <p><strong>Rate per Square Meter:</strong> ₹${result.rate_sqm.toFixed(2)}</p>
+                        <p><strong>Area Value Used:</strong> ${result.area_value}</p>
+                    `;
+                    resultsDiv.style.display = 'block';
+                    
+                    // Store Method 2 rate for recommendation system
+                    window.method2Rate = result.rate_sqm;
+                } else {
+                    resultsDiv.innerHTML = `<p style="color: red;">Error: ${data.message}</p>`;
+                    resultsDiv.style.display = 'block';
+                    
+                    // Clear stored rate on error
+                    window.method2Rate = null;
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                progressSteps.style.display = 'none';
+                document.getElementById('processingMessage2').style.display = 'none';
+                resultsDiv.innerHTML = '<p style="color: red;">An error occurred while processing the request.</p>';
+                resultsDiv.style.display = 'block';
+            });
+        });
     }
 
     // Tab switching functionality
@@ -216,21 +332,44 @@
             }
         }
 
-        // Get Method 2 results
+        // Get Method 2 results - check both old format and new AJAX format
         var method2Rate = null;
         var allParagraphs = document.querySelectorAll('#Method2 .results p');
         console.log('Method 2 paragraphs found:', allParagraphs.length);
         
+        // First try to find in the new AJAX format
         for (var i = 0; i < allParagraphs.length; i++) {
-            if (allParagraphs[i].textContent.includes('Rate per Square Meter')) {
-                var rateText = allParagraphs[i].textContent;
+            var paragraphText = allParagraphs[i].textContent;
+            if (paragraphText.includes('Rate per Square Meter')) {
+                var rateText = paragraphText;
                 console.log('Method 2 rate text:', rateText);
-                var rateMatch = rateText.match(/Rs\.\s*([\d,]+\.?\d*)/);
+                var rateMatch = rateText.match(/₹([\d,]+\.?\d*)/);
                 if (rateMatch) {
                     method2Rate = parseFloat(rateMatch[1].replace(/,/g, ''));
                     console.log('Method 2 rate found:', method2Rate);
+                    break;
                 }
-                break;
+            }
+        }
+        
+        // If not found, try to get from stored window variable or check if results exist in different format
+        if (!method2Rate) {
+            // Check if rate is stored in window variable (from AJAX response)
+            if (window.method2Rate) {
+                method2Rate = window.method2Rate;
+                console.log('Method 2 rate found from stored variable:', method2Rate);
+            } else {
+                // Check if there are any Method 2 results displayed
+                var method2Results = document.querySelector('#Method2 .results');
+                if (method2Results && method2Results.innerHTML.trim() !== '') {
+                    console.log('Method 2 results HTML:', method2Results.innerHTML);
+                    // Try to extract rate from any format in the results
+                    var rateMatch = method2Results.innerHTML.match(/₹([\d,]+\.?\d*)/);
+                    if (rateMatch) {
+                        method2Rate = parseFloat(rateMatch[1].replace(/,/g, ''));
+                        console.log('Method 2 rate found from HTML:', method2Rate);
+                    }
+                }
             }
         }
 
@@ -537,25 +676,47 @@
     }
 
     .progress-step {
-        padding: 8px 0;
-        color: #666;
-        font-size: 14px;
-        opacity: 0.5;
+        padding: 10px;
+        margin: 5px 0;
+        border-radius: 5px;
+        background-color: #f8f9fa;
+        border-left: 4px solid #dee2e6;
         transition: all 0.3s ease;
+        display: flex;
+        align-items: center;
+        gap: 10px;
     }
-    
     .progress-step.active {
-        color: #2196F3;
-        opacity: 1;
+        background-color: #e3f2fd;
+        border-left-color: #2196f3;
+        color: #1976d2;
         font-weight: bold;
-        transform: translateX(5px);
     }
-    
     .progress-step.completed {
-        color: #4CAF50;
-        opacity: 0.8;
+        background-color: #e8f5e8;
+        border-left-color: #4caf50;
+        color: #388e3c;
     }
     
+    /* Loading spinner */
+    .spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid #f3f3f3;
+        border-top: 2px solid #2196f3;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        flex-shrink: 0;
+    }
+    
+    .spinner.hidden {
+        display: none;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
     #processingMessage2 {
         display: none;
         color: rgb(16, 21, 18);
@@ -585,7 +746,7 @@
 
     <!-- Method 1 Tab Content -->
     <div id="Method1" class="tabcontent">
-        <form method="POST" action="/process" enctype="multipart/form-data" onsubmit="showProcessing()">
+        <form id="method1Form" enctype="multipart/form-data" onsubmit="submitMethod1(event)">
             <div class="form-group">
                 <label>Upload Word Document (.docx) (वर्ड डॉक्युमेंट (.docx) अपलोड करा)</label>
                 <input type="file" name="input_file" accept=".docx" required>
@@ -615,7 +776,7 @@
 
     <!-- Method 2 Tab Content -->
     <div id="Method2" class="tabcontent">
-        <form method="POST" action="/process_method2" enctype="multipart/form-data" onsubmit="showProcessingMethod2()">
+        <form id="method2Form" enctype="multipart/form-data" onsubmit="submitMethod2(event)">
             <div class="form-group">
                 <label>District (जिल्हा)</label>
                 <input type="text" name="district" placeholder="e.g., Thane" required>
@@ -652,12 +813,10 @@
                 <button type="submit" id="processButton2" disabled>Get Land Rate (जमीन दर मिळवा)</button>
                 <div id="processingMessage2">
                     <div id="progressSteps" style="display: none;">
-                        <div class="progress-step" id="step1">Connecting to IGR Maharashtra database...</div>
-                        <div class="progress-step" id="step2">Locating district and taluka records...</div>
-                        <div class="progress-step" id="step3">Searching village assessment data...</div>
-                        <div class="progress-step" id="step4">Analyzing land rate tables...</div>
-                        <div class="progress-step" id="step5">Calculating final rates...</div>
-                        <div class="progress-step" id="step6">Processing complete!</div>
+                        <div class="progress-step" id="currentStep">
+                            <div class="spinner" id="progressSpinner"></div>
+                            <span id="stepText">Starting...</span>
+                        </div>
                     </div>
                 </div>
             </div>
