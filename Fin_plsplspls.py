@@ -1,4 +1,4 @@
-# !pip install pandas torch "doctr[torch]" opencv-python matplotlib
+    # !pip install pandas torch "doctr[torch]" opencv-python matplotlib
 
 import cv2
 import re
