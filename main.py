@@ -4,11 +4,16 @@ import requests
 from dotenv import load_dotenv
 from method1 import process_data
 from method2 import get_land_rate
+import threading
+import time
 
 load_dotenv()
 
 # Global variable to store latest value from external sources
 latest_value = {"val": None}
+
+# Global variable to track processing status
+processing_status = {"image_processing": False, "scraping_progress": {}}
 
 # Colab URL for file processing (replace <colab-ngrok-url> with actual ngrok URL)
 COLAB_URL = "https://b1ef6ad913b3.ngrok-free.app/process"
@@ -33,7 +38,20 @@ def login_post():
 def index():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
-    return render_template('index.html')
+    
+    # Get all results from session to display them
+    result_en = session.get('method1_result_en', None)
+    result_mr = session.get('method1_result_mr', None)
+    table = session.get('method1_table', None)
+    method2_result = session.get('method2_result', None)
+    method2_error = session.get('method2_error', None)
+    
+    return render_template('index.html', 
+                         result_en=result_en, 
+                         result_mr=result_mr, 
+                         table=table,
+                         method2_result=method2_result, 
+                         method2_error=method2_error)
 
 @app.route('/clear_results')
 def clear_results():
@@ -62,7 +80,7 @@ def process():
     session['method1_result_mr'] = result_mr
     session['method1_table'] = table.to_html(classes='data', header=True)
     
-    return redirect(url_for('index_with_method1_results'))
+    return redirect(url_for('index'))
 
 @app.route('/index_method1_results')
 def index_with_method1_results():
@@ -85,10 +103,33 @@ def index_with_method1_results():
                          method2_result=method2_result, 
                          method2_error=method2_error)
 
+@app.route('/check_processing_status')
+def check_processing_status():
+    """Check if image is still being processed"""
+    return jsonify({"image_processing": processing_status["image_processing"]})
+
+@app.route('/get_scraping_progress')
+def get_scraping_progress():
+    """Get real-time scraping progress"""
+    # If there's any active session, return its progress (for single-user scenario)
+    if processing_status["scraping_progress"]:
+        # Get the most recent session (last one in the dict)
+        session_id = list(processing_status["scraping_progress"].keys())[-1]
+        progress = processing_status["scraping_progress"][session_id]
+        print(f"[PROGRESS] Active session {session_id}: Step {progress['step']} - {progress['message']}")
+        return jsonify(progress)
+    
+    print(f"[PROGRESS] No active sessions found")
+    return jsonify({"step": 0, "message": "Not started"})
+
 @app.route('/process_method2', methods=['POST'])
 def process_method2():
     if not session.get('logged_in'):
         return redirect(url_for('login'))
+    
+    # Check if image is still being processed
+    if processing_status["image_processing"]:
+        return jsonify({"status": "error", "message": "Image is still being processed. Please wait for the assessment value to be detected."}), 400
     
     district = request.form['district']
     year = request.form['year']
@@ -96,8 +137,18 @@ def process_method2():
     village = request.form['village']
     area_value = float(request.form['area_value'])
     
-    # Get land rate using method2
-    result = get_land_rate(district, year, taluka, village, area_value)
+    # Initialize progress tracking with unique session ID
+    session_id = f"{threading.current_thread().ident}_{int(time.time())}"
+    processing_status["scraping_progress"][session_id] = {"step": 0, "message": "Starting..."}
+    
+    # Store session ID in session for frontend tracking
+    session['current_scraping_session'] = session_id
+    
+    # Get land rate using method2 with progress tracking
+    result = get_land_rate_with_progress(district, year, taluka, village, area_value, session_id)
+    
+    # Clean up progress tracking
+    processing_status["scraping_progress"].pop(session_id, None)
     
     # Store result in session to prevent form resubmission
     if 'error' in result:
@@ -107,7 +158,108 @@ def process_method2():
         session['method2_result'] = result
         session.pop('method2_error', None)
     
-    return redirect(url_for('index_with_results'))
+    return redirect(url_for('index'))
+
+def get_land_rate_with_progress(district, year, taluka, village, area_value, session_id):
+    """Wrapper function to track progress during scraping"""
+    from method2 import IGRScraper
+    
+    scraper = IGRScraper(headless=True)
+    
+    try:
+        # Step 1: Connecting to database
+        processing_status["scraping_progress"][session_id] = {"step": 1, "message": "Connecting to IGR Maharashtra database..."}
+        print(f"[PROGRESS] Step 1: Connecting to database")
+        scraper.start_browser()
+        time.sleep(1)  # Give frontend time to catch up
+        
+        # Step 2: Navigating to district
+        processing_status["scraping_progress"][session_id] = {"step": 2, "message": "Locating district and taluka records..."}
+        print(f"[PROGRESS] Step 2: Navigating to {district}")
+        url = f"{scraper.base_url}{district}"
+        scraper.page.goto(url, wait_until='domcontentloaded')
+        time.sleep(1)
+        
+        # Step 3: Selecting year and taluka
+        processing_status["scraping_progress"][session_id] = {"step": 3, "message": "Searching village assessment data..."}
+        print(f"[PROGRESS] Step 3: Selecting {year} and {taluka}")
+        scraper.page.wait_for_selector('#ctl00_ContentPlaceHolder5_ddlYear', timeout=15000)
+        scraper.page.select_option('#ctl00_ContentPlaceHolder5_ddlYear', label=year)
+        time.sleep(2)
+        scraper.page.wait_for_load_state('networkidle')
+        
+        scraper.page.wait_for_selector('#ctl00_ContentPlaceHolder5_ddlTaluka', timeout=15000)
+        scraper.page.select_option('#ctl00_ContentPlaceHolder5_ddlTaluka', label=taluka)
+        time.sleep(2)
+        scraper.page.wait_for_load_state('networkidle')
+        
+        # Step 4: Selecting village and loading table
+        processing_status["scraping_progress"][session_id] = {"step": 4, "message": "Analyzing land rate tables..."}
+        print(f"[PROGRESS] Step 4: Selecting village {village}")
+        scraper.page.wait_for_selector('#ctl00_ContentPlaceHolder5_ddlVillage', timeout=15000)
+        scraper.page.wait_for_function(
+            "document.querySelector('#ctl00_ContentPlaceHolder5_ddlVillage').options.length > 1",
+            timeout=10000
+        )
+        scraper.page.select_option('#ctl00_ContentPlaceHolder5_ddlVillage', label=village)
+        time.sleep(2)
+        scraper.page.wait_for_load_state('networkidle')
+        
+        # Step 5: Processing table data
+        processing_status["scraping_progress"][session_id] = {"step": 5, "message": "Calculating final rates..."}
+        print(f"[PROGRESS] Step 5: Loading table data")
+        scraper.page.wait_for_selector('#ctl00_ContentPlaceHolder5_ruralDataGrid', timeout=15000)
+        table_html = scraper.page.locator('#ctl00_ContentPlaceHolder5_ruralDataGrid').inner_html()
+        time.sleep(1)
+        
+        # Step 6: Final calculation
+        processing_status["scraping_progress"][session_id] = {"step": 6, "message": "Processing complete!"}
+        print(f"[PROGRESS] Step 6: Processing complete")
+        
+        # Parse and return result (using existing logic from method2)
+        from bs4 import BeautifulSoup
+        import re
+        
+        full_table_html = f"<table id='ctl00_ContentPlaceHolder5_ruralDataGrid'>{table_html}</table>"
+        soup = BeautifulSoup(full_table_html, 'html.parser')
+        table = soup.find('table', {'id': 'ctl00_ContentPlaceHolder5_ruralDataGrid'})
+        
+        if not table:
+            return {"error": "Could not find the rate table"}
+        
+        rows = table.find_all('tr')[1:]  # Skip header row
+        
+        for row in rows:
+            cells = row.find_all('td')
+            if len(cells) >= 3:
+                assessment_range = cells[1].get_text().strip()
+                rate_hectares = cells[2].get_text().strip()
+                
+                # Check if area_value fits in range
+                if scraper.is_value_in_range(area_value, assessment_range):
+                    try:
+                        rate_per_hectare = float(rate_hectares)
+                        rate_per_sqm = rate_per_hectare / 10000
+                        
+                        # Keep progress active for a moment to show completion
+                        time.sleep(2)
+                        
+                        return {
+                            "range": assessment_range,
+                            "rate_hectares": rate_per_hectare,
+                            "rate_sqm": rate_per_sqm,
+                            "area_value": area_value
+                        }
+                    except ValueError:
+                        return {"error": f"Could not convert rate to number: {rate_hectares}"}
+        
+        return {"error": f"No matching range found for area value: {area_value}"}
+        
+    except Exception as e:
+        print(f"[PROGRESS] Error: {str(e)}")
+        return {"error": str(e)}
+    finally:
+        scraper.close_browser()
 
 @app.route('/index_results')
 def index_with_results():
@@ -191,10 +343,12 @@ def upload_file():
         if file_extension not in allowed_extensions:
             return jsonify({"status": "error", "message": "Only JPG and PNG files are allowed"}), 400
         
-        print(f"[UPLOAD] Received file: {file.filename} ({file.mimetype})")
-        
-        # Forward file to Colab
         try:
+            print(f"[UPLOAD] Received file: {file.filename} ({file.mimetype})")
+            
+            # Set image processing flag
+            processing_status["image_processing"] = True
+            
             # Prepare file for forwarding
             file.stream.seek(0)  # Reset stream position
             files = {"file": (file.filename, file.stream, file.mimetype)}
@@ -217,15 +371,25 @@ def upload_file():
                     total_cultivable_area = colab_data.get('total_cultivable_area')
                     
                     if assessment and total_cultivable_area:
-                        # Handle different formats like '6.25.00' -> convert to float
-                        assessment_val = float(assessment.replace('.', '', assessment.count('.') - 1)) if '.' in assessment else float(assessment)
-                        total_area_val = float(total_cultivable_area.replace('.', '', total_cultivable_area.count('.') - 1)) if '.' in total_cultivable_area else float(total_cultivable_area)
+                        # Handle different formats like '6.25.00' -> 6.25 or '0.02.00' -> 0.02
+                        assessment_val = float(assessment)
+                        
+                        # For total_cultivable_area, handle formats like '0.02.00' -> 0.02
+                        if total_cultivable_area.count('.') > 1:
+                            # Split by dots and take first two parts: '0.02.00' -> '0.02'
+                            parts = total_cultivable_area.split('.')
+                            total_area_val = float(f"{parts[0]}.{parts[1]}")
+                        else:
+                            total_area_val = float(total_cultivable_area)
                         
                         calculated_assessment = assessment_val / total_area_val
                         
                         print(f"[CALCULATION] Assessment: {assessment} -> {assessment_val}")
                         print(f"[CALCULATION] Total Area: {total_cultivable_area} -> {total_area_val}")
                         print(f"[CALCULATION] Calculated Assessment Value: {calculated_assessment}")
+                        
+                        # Clear image processing flag
+                        processing_status["image_processing"] = False
                         
                         # Return enhanced response with calculated value
                         return jsonify({

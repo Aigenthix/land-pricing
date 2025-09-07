@@ -36,13 +36,93 @@
 
     // Function to show processing message for method 2
     function showProcessingMethod2() {
-        document.getElementById('processButton2').disabled = true;
-        document.getElementById('processingMessage2').style.display = 'block';
-        // Hide any previous results
-        const resultsDiv = document.querySelector('#Method2 .results');
-        if (resultsDiv) {
-            resultsDiv.style.display = 'none';
-        }
+        // Check if image is still processing before allowing submission
+        fetch('/check_processing_status')
+        .then(response => response.json())
+        .then(data => {
+            if (data.image_processing) {
+                alert('Image is still being processed. Please wait for the assessment value to be detected.');
+                return false;
+            }
+            
+            const progressSteps = document.getElementById('progressSteps');
+            progressSteps.style.display = 'block';
+            document.getElementById('processingMessage2').style.display = 'block';
+            
+            // Get session ID from backend after form submission
+            // We'll get it from the server response or use a fallback
+            const sessionId = Date.now().toString();
+            
+            // Start real-time progress tracking
+            trackScrapingProgress(sessionId);
+            
+            // Hide any previous results
+            const resultsDiv = document.querySelector('#Method2 .results');
+            if (resultsDiv) {
+                resultsDiv.style.display = 'none';
+            }
+        });
+    }
+    
+    function trackScrapingProgress(sessionId) {
+        const steps = ['step1', 'step2', 'step3', 'step4', 'step5', 'step6'];
+        let currentStep = 0;
+        
+        console.log('[PROGRESS] Starting progress tracking...');
+        
+        const progressInterval = setInterval(() => {
+            fetch('/get_scraping_progress')
+            .then(response => response.json())
+            .then(data => {
+                console.log('[PROGRESS] Received:', data);
+                
+                if (data.step > currentStep) {
+                    // Mark previous steps as completed
+                    for (let i = 0; i < data.step - 1; i++) {
+                        const prevStep = document.getElementById(steps[i]);
+                        if (prevStep) {
+                            prevStep.classList.remove('active');
+                            prevStep.classList.add('completed');
+                            console.log(`[PROGRESS] Completed step ${i + 1}`);
+                        }
+                    }
+                    
+                    // Activate current step
+                    if (data.step <= steps.length && data.step > 0) {
+                        const activeStep = document.getElementById(steps[data.step - 1]);
+                        if (activeStep) {
+                            activeStep.classList.add('active');
+                            console.log(`[PROGRESS] Activated step ${data.step}`);
+                        }
+                    }
+                    
+                    currentStep = data.step;
+                    
+                    // If processing is complete, stop tracking
+                    if (data.step >= 6) {
+                        clearInterval(progressInterval);
+                        setTimeout(() => {
+                            const lastStep = document.getElementById(steps[5]);
+                            if (lastStep) {
+                                lastStep.classList.remove('active');
+                                lastStep.classList.add('completed');
+                                console.log('[PROGRESS] All steps completed');
+                            }
+                        }, 1000);
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Progress tracking error:', error);
+                clearInterval(progressInterval);
+            });
+        }, 500); // Check every 500ms for more responsive updates
+        
+        // Safety timeout to stop tracking after 45 seconds
+        setTimeout(() => {
+            clearInterval(progressInterval);
+            console.log('[PROGRESS] Timeout reached, stopping tracking');
+        }, 45000);
     }
 
     // Function to download table as CSV
@@ -441,12 +521,12 @@
     
     /* Loading spinner */
     .spinner {
-        border: 3px solid #f3f3f3;
-        border-top: 3px solid #28a745;
+        border: 2px solid #f3f3f3;
+        border-top: 2px solid #3498db;
         border-radius: 50%;
         width: 20px;
         height: 20px;
-        animation: spin 1s linear infinite;
+        animation: spin 2s linear infinite;
         display: inline-block;
         margin-left: 10px;
     }
@@ -454,6 +534,26 @@
     @keyframes spin {
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
+    }
+
+    .progress-step {
+        padding: 8px 0;
+        color: #666;
+        font-size: 14px;
+        opacity: 0.5;
+        transition: all 0.3s ease;
+    }
+    
+    .progress-step.active {
+        color: #2196F3;
+        opacity: 1;
+        font-weight: bold;
+        transform: translateX(5px);
+    }
+    
+    .progress-step.completed {
+        color: #4CAF50;
+        opacity: 0.8;
     }
     
     #processingMessage2 {
@@ -500,8 +600,12 @@
             </div>
         </form>
         <div class="results">
-            <p>{{ result_en }}</p>
-            <p>{{ result_mr }}</p>
+            {% if result_en %}
+                <p>{{ result_en }}</p>
+            {% endif %}
+            {% if result_mr %}
+                <p>{{ result_mr }}</p>
+            {% endif %}
             {% if table %}
                 {{ table | safe }}
                 <button class="download-btn" onclick="downloadCSV()" style="display: block;">Download Table as CSV</button>
@@ -546,7 +650,16 @@
             </div>
             <div class="form-group">
                 <button type="submit" id="processButton2" disabled>Get Land Rate (जमीन दर मिळवा)</button>
-                <div id="processingMessage2">Processing... Please wait while we fetch the land rates.<span class="spinner"></span></div>
+                <div id="processingMessage2">
+                    <div id="progressSteps" style="display: none;">
+                        <div class="progress-step" id="step1">Connecting to IGR Maharashtra database...</div>
+                        <div class="progress-step" id="step2">Locating district and taluka records...</div>
+                        <div class="progress-step" id="step3">Searching village assessment data...</div>
+                        <div class="progress-step" id="step4">Analyzing land rate tables...</div>
+                        <div class="progress-step" id="step5">Calculating final rates...</div>
+                        <div class="progress-step" id="step6">Processing complete!</div>
+                    </div>
+                </div>
             </div>
         </form>
         <div class="results">
