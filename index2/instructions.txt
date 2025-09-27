@@ -1,0 +1,13 @@
+(1) Serial number
+(2) Year - दस्त क्रमांक se extract year
+(3) दुय्यम निबंधक (top right)
+(4) दस्त क्रमांक 
+(5) Point number 10 from Index
+(6) Point number 1 from Index
+(7) Point number 4 ((...)) from Index
+(8) Point number 5 from Index (in sq meters)
+(9) Divide (8) by 10,000
+(10) Point number 12 from Index
+(11) (10) divided by (8)
+(12) Multiply (11) with 100
+(13) Multiply (12) with 100
