@@ -4,7 +4,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 # File paths
-csv_file = "index2/extracted_property_data.csv"
+csv_file = "index2/extracted_property_data_prakar.csv"
 template_file = "index2/format.docx"
 output_file = "index2/output.docx"
 

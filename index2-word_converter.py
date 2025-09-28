@@ -64,6 +64,9 @@ def get_multipage_extraction_prompt():
         by 10,000. If it is already 'चौ.मीटर', use the value directly. Return only the
         final numerical value in Square Meters.
     -   `stamp_duty`: The value for '(12)बाजारभावाप्रमाणे मुद्रांक शुल्क'.
+    -   `prakar`: Analyze the text in section '(4) भू-मापन...' and related context. If it contains
+        the Marathi word 'सदनिका' or mentions चौ.फूट, set `prakar` to 'सदनिका'. Otherwise set it to
+        'बिनशेती जमिन'.
 
     Return ONLY the JSON array and nothing else.
     """
@@ -121,6 +124,7 @@ def process_multipage_pdf(pdf_path: pathlib.Path, model, prompt: str):
                 "rate_per_sqm": f"{rate_per_sqm:.2f}",
                 "rate_per_guntha": f"{rate_per_guntha:.2f}",
                 "rate_per_ha": f"{rate_per_ha:.2f}",
+                "prakar": data.get("prakar", "N/A"),
                 "source_file": pdf_path.name,
                 "page_record_num": i + 1,
             }
@@ -142,7 +146,7 @@ def export_csv(records_by_file, csv_output: str):
         "(5) Registration Date", "(6) Document Type", "(7) Survey Number",
         "(8) Area (sq meters)", "(9) Area (Hectares)", "(10) Stamp Duty",
         "(11) Rate per SqM", "(12) Rate per Guntha", "(13) Rate per Ha",
-        "Source PDF", "Record # in PDF"
+        "प्रकार", "Source PDF", "Record # in PDF"
     ]
 
     with open(csv_output, "w", newline="", encoding="utf-8") as csvfile:
@@ -156,7 +160,7 @@ def export_csv(records_by_file, csv_output: str):
                 rec["registration_date"], rec["document_type"], rec["survey_number"],
                 rec["area_sq_meter"], rec["area_hectares"], rec["stamp_duty"],
                 rec["rate_per_sqm"], rec["rate_per_guntha"], rec["rate_per_ha"],
-                rec["source_file"], rec["page_record_num"]
+                rec.get("prakar", "N/A"), rec["source_file"], rec["page_record_num"]
             ]
             writer.writerow(row)
             serial_number += 1
