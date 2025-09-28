@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file
 import os
 from dotenv import load_dotenv
 from method1 import process_data
@@ -7,6 +7,7 @@ import threading
 import time
 import tempfile
 from Fin_plsplspls import RobustLandRecordOCRDocTR
+from NEWmethod1 import process_index2_pdf_to_html
 
 load_dotenv()
 
@@ -14,7 +15,7 @@ load_dotenv()
 latest_value = {"val": None}
 
 # Global variable to track processing status
-processing_status = {"image_processing": False, "scraping_progress": {}}
+processing_status = {"image_processing": False, "scraping_progress": {}, "index2_progress": {"step": 0, "message": "Not started"}}
 
 # Initialize OCR processor globally
 ocr_processor = None
@@ -72,6 +73,7 @@ def clear_results():
     session.pop('method1_result_en', None)
     session.pop('method1_result_mr', None)
     session.pop('method1_table', None)
+    session.pop('method1_index2_html', None)
     session.pop('method2_result', None)
     session.pop('method2_error', None)
     
@@ -97,6 +99,63 @@ def process():
         "result_mr": result_mr,
         "table": table.to_html(classes='data', header=True)
     })
+
+@app.route('/process_index2', methods=['POST'])
+def process_index2():
+    """New Method 1 (Index2 Analysis): accepts a PDF, processes it via Gemini, and returns styled HTML tables.
+    Does not write CSV or Word; renders HTML preserving styling classes.
+    """
+    if not session.get('logged_in'):
+        return jsonify({"status": "error", "message": "Not logged in"}), 401
+
+    if 'input_file' not in request.files:
+        return jsonify({"status": "error", "message": "No file uploaded"}), 400
+
+    pdf_file = request.files['input_file']
+    if not pdf_file or pdf_file.filename == '':
+        return jsonify({"status": "error", "message": "No file uploaded"}), 400
+
+    # Validate file type (pdf)
+    if not pdf_file.filename.lower().endswith('.pdf'):
+        return jsonify({"status": "error", "message": "Only PDF files are allowed"}), 400
+
+    try:
+        # Step 1: Detecting values using OCR (Gemini extract)
+        processing_status["index2_progress"] = {"step": 1, "message": "Detecting values using OCR"}
+        pdf_bytes = pdf_file.read()
+        html, tmp_docx_path = process_index2_pdf_to_html(pdf_bytes)
+
+        # Step 2: Filtering relevant details (done inside NEWmethod1)
+        processing_status["index2_progress"] = {"step": 2, "message": "Filtering relevant details"}
+
+        # Step 3: Calculating Land Price (rates and averages)
+        processing_status["index2_progress"] = {"step": 3, "message": "Calculating Land Price"}
+
+        # Store results
+        session['method1_index2_html'] = html
+        session['method1_index2_docx_path'] = tmp_docx_path
+
+        # Step 4: Done
+        processing_status["index2_progress"] = {"step": 4, "message": "Done"}
+
+        return jsonify({"status": "success", "html": html, "download": bool(tmp_docx_path)})
+    except Exception as e:
+        processing_status["index2_progress"] = {"step": 0, "message": f"Error: {str(e)}"}
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/get_index2_progress')
+def get_index2_progress():
+    return jsonify(processing_status.get("index2_progress", {"step": 0, "message": "Not started"}))
+
+@app.route('/download_index2_docx')
+def download_index2_docx():
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    path = session.get('method1_index2_docx_path')
+    if not path or not os.path.exists(path):
+        return jsonify({"status": "error", "message": "No generated document available"}), 404
+    # Use a friendly filename
+    return send_file(path, as_attachment=True, download_name='index2_output.docx')
 
 @app.route('/index_method1_results')
 def index_with_method1_results():

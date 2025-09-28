@@ -151,7 +151,7 @@
         document.body.removeChild(link);
     }
 
-    // AJAX form submission for Method 1
+    // AJAX form submission for Method 1 (Index2 Analysis)
     function submitMethod1(event) {
         event.preventDefault();
         
@@ -159,25 +159,74 @@
         const formData = new FormData(form);
         const processButton = document.getElementById('processButton');
         const processingMessage = document.getElementById('processingMessage');
+        const progressWrap = document.getElementById('index2Progress');
+        const progressText = document.getElementById('index2StepText');
+        const spinner = document.getElementById('index2Spinner');
         
         // Show processing state
         processButton.disabled = true;
         processingMessage.style.display = 'block';
+        progressWrap.style.display = 'block';
+        spinner.classList.remove('hidden');
+
+        // Start progress polling
+        let poll = setInterval(() => {
+            fetch('/get_index2_progress')
+            .then(r => r.json())
+            .then(d => {
+                if (d && d.message) {
+                    progressText.textContent = d.message;
+                    if (d.step >= 4 || (d.message && d.message.toLowerCase().includes('done'))) {
+                        spinner.classList.add('hidden');
+                        clearInterval(poll);
+                    }
+                }
+            })
+            .catch(() => {});
+        }, 500);
         
-        fetch('/process', {
+        // New endpoint for Index2 PDF processing
+        fetch('/process_index2', {
             method: 'POST',
             body: formData
         })
         .then(response => response.json())
         .then(data => {
             if (data.status === 'success') {
-                // Update results in the current tab without redirecting
+                // Stop backend polling and simulate final quick steps on UI
+                try { clearInterval(poll); } catch(e) {}
                 const resultsDiv = document.querySelector('#Method1 .results');
-                resultsDiv.innerHTML = `
-                    ${data.result_en ? `<p>${data.result_en}</p>` : ''}
-                    ${data.result_mr ? `<p>${data.result_mr}</p>` : ''}
-                    ${data.table ? `${data.table}<button class="download-btn" onclick="downloadCSV()" style="display: block;">Download Table as CSV</button>` : ''}
-                `;
+                const dlBtn = document.getElementById('downloadIndex2Docx');
+
+                // Keep spinner visible during simulated steps
+                const runSimulatedSteps = async () => {
+                    // Step: Filtering relevant details
+                    progressText.textContent = 'Filtering relevant details';
+                    spinner.classList.remove('hidden');
+                    await new Promise(r => setTimeout(r, 1200));
+
+                    // Step: Calculating Land Price
+                    progressText.textContent = 'Calculating Land Price';
+                    await new Promise(r => setTimeout(r, 1200));
+
+                    // Step: Done (briefly)
+                    progressText.textContent = 'Done';
+                    spinner.classList.add('hidden');
+                    await new Promise(r => setTimeout(r, 800));
+
+                    // Now render tables and finalize UI
+                    resultsDiv.innerHTML = data.html || '<p>No output generated.</p>';
+                    progressWrap.style.display = 'none';
+
+                    if (data.download) {
+                        dlBtn.style.display = 'inline-block';
+                        dlBtn.onclick = () => { window.location = '/download_index2_docx'; };
+                    } else {
+                        dlBtn.style.display = 'none';
+                    }
+                };
+
+                runSimulatedSteps();
             } else {
                 alert('Error: ' + data.message);
             }
@@ -190,6 +239,7 @@
             // Reset form state
             processButton.disabled = false;
             processingMessage.style.display = 'none';
+            spinner.classList.add('hidden');
         });
     }
 
@@ -736,7 +786,7 @@
     <div style="display: flex; justify-content: center; align-items: center; gap: 20px; margin: 20px auto; width: fit-content; padding: 10px; background-color: #f8f9fa; border-radius: 8px;">
         <!-- Tab navigation -->
         <div class="tab" style="margin: 0;">
-            <button class="tablinks" onclick="openTab(event, 'Method1')">Method 1: Document Analysis</button>
+            <button class="tablinks" onclick="openTab(event, 'Method1')">Method 1: Index2 Analysis</button>
             <button class="tablinks" onclick="openTab(event, 'Method2')">Method 2: IGR Web Scraping</button>
             <button class="tablinks" onclick="openTab(event, 'Method3')">Recommendation</button>
         </div>
@@ -748,29 +798,30 @@
     <div id="Method1" class="tabcontent">
         <form id="method1Form" enctype="multipart/form-data" onsubmit="submitMethod1(event)">
             <div class="form-group">
-                <label>Upload Word Document (.docx) (वर्ड डॉक्युमेंट (.docx) अपलोड करा)</label>
-                <input type="file" name="input_file" accept=".docx" required>
+                <label>Upload Index-II PDF (पीडीएफ अपलोड करा)</label>
+                <input type="file" name="input_file" accept=".pdf" required>
             </div>
             <div class="form-group">
-                <label>Exclude Survey Numbers (comma-separated) (सर्वेक्षण क्रमांक वगळा (स्वल्पविरामाने विभक्त केलेले))</label>
-                <input type="text" name="excluded_survey_numbers" placeholder="e.g., 196, 172">
-            </div>
-            <div class="form-group">
-                <button type="submit" id="processButton">Process Table (प्रक्रिया सारणी)</button>
-                <div id="processingMessage">Processing... Please wait for 1-2 minutes to get the table.</div>
+                <button type="submit" id="processButton">Process Index-II (प्रक्रिया)</button>
+                <div id="processingMessage">Processing PDF... This may take a minute.</div>
             </div>
         </form>
         <div class="results">
-            {% if result_en %}
-                <p>{{ result_en }}</p>
+            {% if session.get('method1_index2_html') %}
+                {{ session.get('method1_index2_html') | safe }}
             {% endif %}
-            {% if result_mr %}
-                <p>{{ result_mr }}</p>
-            {% endif %}
-            {% if table %}
-                {{ table | safe }}
-                <button class="download-btn" onclick="downloadCSV()" style="display: block;">Download Table as CSV</button>
-            {% endif %}
+        </div>
+        <!-- Progress UI for Method 1 (Index2) -->
+        <div id="index2Progress" style="display:none; margin-top:10px;">
+            <div class="progress-step active" id="index2CurrentStep">
+                <span id="index2StepText">Starting...</span>
+                <span class="spinner" id="index2Spinner"></span>
+            </div>
+        </div>
+        <div style="margin-top:10px;">
+            <div class="form-group" style="margin-top: 0;">
+                <button type="button" id="downloadIndex2Docx" style="display:none;">Download Result (परिणाम डाउनलोड करा)</button>
+            </div>
         </div>
     </div>
 
