@@ -86,6 +86,67 @@ def clean_and_convert_to_float(value, default=0.0):
         return default
 
 
+# --- Helpers for Survey Number normalization ---
+def _is_digit_char(c: str) -> bool:
+    # Western 0-9 or Devanagari ०-९
+    return ("0" <= c <= "9") or ("\u0966" <= c <= "\u096F")
+
+
+def _is_numeric_token(token: str) -> bool:
+    token = (token or "").strip()
+    if not token:
+        return False
+    return all(_is_digit_char(ch) for ch in token)
+
+
+def _starts_with_number(token: str) -> bool:
+    token = (token or "").strip()
+    return bool(token) and _is_digit_char(token[0])
+
+
+def normalize_survey_numbers(value) -> str:
+    """Normalize survey numbers:
+    - If a list like ['142','1ब','143','2ब'], output '142, 142 1ब, 143, 143 2ब'.
+    - If already a string, try parsing JSON list; otherwise return as-is.
+    """
+    # If value is already a list
+    items = None
+    if isinstance(value, list):
+        items = [str(v).strip() for v in value if str(v).strip()]
+    elif isinstance(value, str):
+        txt = value.strip()
+        # Try to parse JSON-like list
+        if txt.startswith("[") and txt.endswith("]"):
+            try:
+                parsed = json.loads(txt)
+                if isinstance(parsed, list):
+                    items = [str(v).strip() for v in parsed if str(v).strip()]
+            except Exception:
+                items = None
+        # Fallback: split by comma if multiple present
+        if items is None:
+            if "," in txt:
+                items = [s.strip() for s in txt.split(",") if s.strip()]
+            else:
+                return txt  # single token string
+    else:
+        return str(value)
+
+    # If we have items, stitch subdivisions with last base
+    out = []
+    last_base = None
+    for tok in items:
+        if _is_numeric_token(tok):
+            last_base = tok
+            out.append(tok)
+        elif _starts_with_number(tok) and last_base:
+            out.append(f"{last_base} {tok}")
+        else:
+            # Unknown token type; just append as-is
+            out.append(tok)
+    return ", ".join(out)
+
+
 def process_multipage_pdf(pdf_path: pathlib.Path, model, prompt: str):
     """Processes a single multi-page PDF, which may contain multiple records.
     Returns list of processed record dicts.
@@ -108,6 +169,7 @@ def process_multipage_pdf(pdf_path: pathlib.Path, model, prompt: str):
             area_sqm = clean_and_convert_to_float(data.get("area_sq_meter"))
             stamp_duty = clean_and_convert_to_float(data.get("stamp_duty"))
             amount = clean_and_convert_to_float(data.get("amount"))
+            survey_norm = normalize_survey_numbers(data.get("survey_number"))
 
             hectares = area_sqm / 10000 if area_sqm > 0 else 0
             rate_per_sqm = stamp_duty / area_sqm if area_sqm > 0 else 0
@@ -121,7 +183,7 @@ def process_multipage_pdf(pdf_path: pathlib.Path, model, prompt: str):
                 "dast_kramank_full": data.get("dast_kramank_full", "N/A"),
                 "registration_date": data.get("registration_date", "N/A"),
                 "document_type": data.get("document_type", "N/A"),
-                "survey_number": data.get("survey_number", "N/A"),
+                "survey_number": survey_norm if survey_norm else "N/A",
                 "area_sq_meter": f"{area_sqm:.4f}",
                 "area_hectares": f"{hectares:.8f}",
                 "stamp_duty": f"{stamp_duty:.2f}",
