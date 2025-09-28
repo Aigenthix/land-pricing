@@ -10,6 +10,7 @@ from docx.oxml.ns import qn
 from dotenv import load_dotenv
 import google.generativeai as genai
 import math
+from datetime import datetime
 
 # ----------------------
 # Configuration & Paths
@@ -297,6 +298,12 @@ def future_filter_and_aggregate(word_file_path: str):
     try:
         col_idx_prakar = kept_headers.index("प्रकार")
         col_idx_prati_chou_mi = kept_headers.index("(11) Rate per SqM")
+        col_idx_reg_date = kept_headers.index("(5) Registration Date")
+        col_idx_area_sqm = kept_headers.index("(8) Area (sq meters)")
+        col_idx_amount = kept_headers.index("Amount")
+        col_idx_doc_type = kept_headers.index("(6) Document Type")
+        col_idx_dast = kept_headers.index("(4) Dast Kramank")
+        col_idx_survey = kept_headers.index("(7) Survey Number")
     except ValueError:
         print("Internal header mapping failed; please verify export_csv headers.")
         return
@@ -308,6 +315,36 @@ def future_filter_and_aggregate(word_file_path: str):
         r for r in data_rows
         if len(r) > max(col_idx_prakar, col_idx_prati_chou_mi) and r[col_idx_prakar] == 'बिनशेती जमिन'
     ]
+
+    # Prompt for date range (dd/mm/yyyy); blank to skip date filtering
+    try:
+        start_str = input("Enter start date (dd/mm/yyyy) or leave blank to skip: ").strip()
+        end_str = input("Enter end date (dd/mm/yyyy) or leave blank to skip: ").strip()
+        start_dt = datetime.strptime(start_str, "%d/%m/%Y") if start_str else None
+        end_dt = datetime.strptime(end_str, "%d/%m/%Y") if end_str else None
+    except Exception:
+        print("Invalid date input; skipping date-range filtering.")
+        start_dt = None
+        end_dt = None
+
+    def parse_date_safe(s: str):
+        try:
+            return datetime.strptime((s or '').strip(), "%d/%m/%Y")
+        except Exception:
+            return None
+
+    if start_dt or end_dt:
+        filtered_in_range = []
+        for r in filtered:
+            dt = parse_date_safe(r[col_idx_reg_date]) if len(r) > col_idx_reg_date else None
+            if dt is None:
+                continue
+            if start_dt and dt < start_dt:
+                continue
+            if end_dt and dt > end_dt:
+                continue
+            filtered_in_range.append(r)
+        filtered = filtered_in_range
 
     # Convert 'प्रती चौ.मी.' to float for sorting
     def to_float_safe(s):
@@ -338,25 +375,70 @@ def future_filter_and_aggregate(word_file_path: str):
             cells[c_idx].text = text
     add_table_borders(new_table)
 
-    # Insert a second heading and third table with top 50%
-    doc.add_paragraph("बिनशेती जमिन - टॉप 50% (प्रती चौ.मी. नुसार)")
-    top_table = doc.add_table(rows=1, cols=len(visual_header))
+    # Build a derived table (third) with selected columns in exact order:
+    # 1,7,8,9,4,5,15,14,6 plus a new computed column 'दर प्रती चौ.मी.' = Amount / Area(sq m)
+    derived_indices = [
+        0,                     # Serial Number
+        col_idx_survey,        # (7) Survey Number
+        col_idx_area_sqm,      # (8) Area (sq meters)
+        kept_headers.index("(9) Area (Hectares)"),  # (9)
+        col_idx_dast,          # (4) Dast Kramank
+        col_idx_reg_date,      # (5) Registration Date
+        col_idx_amount,        # (15) Amount
+        col_idx_prakar,        # (14) प्रकार
+        col_idx_doc_type       # (6) Document Type
+    ]
+
+    doc.add_paragraph("बिनशेती जमिन - निवडक स्तंभ व नवीन 'दर प्रती चौ.मी.' सह")
+    derived_header = [visual_header[i] for i in derived_indices] + ["दर प्रती चौ.मी."]
+    derived_table = doc.add_table(rows=1, cols=len(derived_header))
+    derived_table.style = base_table.style
+    for c_idx, text in enumerate(derived_header):
+        derived_table.rows[0].cells[c_idx].text = text
+
+    def compute_rate(row):
+        amt = to_float_safe(row[col_idx_amount]) if len(row) > col_idx_amount else 0.0
+        area = to_float_safe(row[col_idx_area_sqm]) if len(row) > col_idx_area_sqm else 0.0
+        return (amt / area) if area > 0 else 0.0
+
+    derived_rows = []
+    for r in filtered:
+        rate = compute_rate(r)
+        values = [r[i] if i < len(r) else "" for i in derived_indices]
+        # write row
+        cells = derived_table.add_row().cells
+        for c_idx, text in enumerate(values + [f"{rate:.2f}"]):
+            cells[c_idx].text = text
+        # keep for sorting/top-half/avg
+        derived_rows.append((values, rate))
+    add_table_borders(derived_table)
+
+    # Sort by new rate column desc and keep top 50%
+    derived_rows.sort(key=lambda t: t[1], reverse=True)
+    n = len(derived_rows)
+    keep_n = max(1, math.ceil(n * 0.5)) if n > 0 else 0
+    top_half_rows = derived_rows[:keep_n]
+
+    # Insert a fourth table for top 50%
+    doc.add_paragraph("बिनशेती जमिन - टॉप 50% (नवीन 'दर प्रती चौ.मी.' नुसार)")
+    top_header = derived_header
+    top_table = doc.add_table(rows=1, cols=len(top_header))
     top_table.style = base_table.style
-    for c_idx, text in enumerate(visual_header):
+    for c_idx, text in enumerate(top_header):
         top_table.rows[0].cells[c_idx].text = text
-    for r in top_half:
+    for values, rate in top_half_rows:
         cells = top_table.add_row().cells
-        for c_idx, text in enumerate(r[:len(visual_header)]):
+        for c_idx, text in enumerate(values + [f"{rate:.2f}"]):
             cells[c_idx].text = text
     add_table_borders(top_table)
 
-    # Compute average of 'प्रती चौ.मी.' from top_half
-    if top_half:
-        avg_value = sum(to_float_safe(r[col_idx_prati_chou_mi]) for r in top_half) / len(top_half)
+    # Compute and print average of new rate column from top_half
+    if top_half_rows:
+        avg_value = sum(rate for _, rate in top_half_rows) / len(top_half_rows)
     else:
         avg_value = 0.0
 
-    doc.add_paragraph(f"Average प्रती चौ.मी. = {avg_value:.2f}")
+    doc.add_paragraph(f"Average दर प्रती चौ.मी. = {avg_value:.2f}")
 
     # Overwrite the same output file
     doc.save(word_file_path)
