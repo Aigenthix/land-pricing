@@ -9,6 +9,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from dotenv import load_dotenv
 import google.generativeai as genai
+import math
 
 # ----------------------
 # Configuration & Paths
@@ -243,104 +244,111 @@ def main():
 
     # Export Word from CSV (overwrite)
     export_word_from_csv(CSV_OUTPUT_FILE, WORD_TEMPLATE_FILE, WORD_OUTPUT_FILE)
+    
+    # Post-processing on the generated Word file
+    future_filter_and_aggregate(WORD_OUTPUT_FILE)
 
-    # --------------------------------------------------------------
-    # Future processing block (COMMENTED OUT intentionally for later)
-    # --------------------------------------------------------------
-    # from docx import Document
-    # import math
-    #
-    # def future_filter_and_aggregate(word_file_path: str):
-    #     """Future step: filter rows by 'प्रकार' == 'बिनशेती जामिन',
-    #     create new table under previous table with same formatting, sort by 'प्रती चौ.मी.'
-    #     descending, keep top 50% (rounding up), compute average of 'प्रती चौ.मी.' and
-    #     print it after a third table. This assumes the first table has a header row with
-    #     exact Marathi labels including 'प्रकार' and 'प्रती चौ.मी.'"""
-    #
-    #     doc = Document(word_file_path)
-    #
-    #     if not doc.tables:
-    #         print("No tables found in the document for future processing.")
-    #         return
-    #
-    #     base_table = doc.tables[0]
-    #
-    #     # Build a list of rows (as lists of text) and detect column indices
-    #     rows_text = []
-    #     for r_idx, row in enumerate(base_table.rows):
-    #         cell_texts = [cell.text.strip() for cell in row.cells]
-    #         rows_text.append(cell_texts)
-    #
-    #     if not rows_text:
-    #         print("Base table is empty.")
-    #         return
-    #
-    #     header = rows_text[0]
-    #     # Find exact 'प्रकार' and 'प्रती चौ.मी.' columns
-    #     try:
-    #         col_idx_prakar = header.index('प्रकार')
-    #         col_idx_prati_chou_mi = header.index('प्रती चौ.मी.')
-    #     except ValueError:
-    #         print("Required columns 'प्रकार' or 'प्रती चौ.मी.' not found in header.")
-    #         return
-    #
-    #     data_rows = rows_text[1:]
-    #
-    #     # Filter by 'प्रकार' == 'बिनशेती जामिन'
-    #     filtered = [r for r in data_rows if len(r) > max(col_idx_prakar, col_idx_prati_chou_mi) and r[col_idx_prakar] == 'बिनशेती जामिन']
-    #
-    #     # Convert 'प्रती चौ.मी.' to float for sorting
-    #     def to_float_safe(s):
-    #         s_clean = re.sub(r"[^0-9.]", "", s or "")
-    #         try:
-    #             return float(s_clean) if s_clean else 0.0
-    #         except ValueError:
-    #             return 0.0
-    #
-    #     filtered.sort(key=lambda r: to_float_safe(r[col_idx_prati_chou_mi]), reverse=True)
-    #
-    #     # Keep top 50% rows (round up)
-    #     n = len(filtered)
-    #     keep_n = math.ceil(n * 0.5)
-    #     top_half = filtered[:keep_n]
-    #
-    #     # Insert a heading and a new table for filtered rows under the original table
-    #     doc.add_paragraph("बिनशेती जामिन - फिल्टर केलेले")
-    #     new_table = doc.add_table(rows=1, cols=len(header))
-    #     # Copy header
-    #     for c_idx, text in enumerate(header):
-    #         new_table.rows[0].cells[c_idx].text = text
-    #     # Add rows
-    #     for r in filtered:
-    #         cells = new_table.add_row().cells
-    #         for c_idx, text in enumerate(r):
-    #             cells[c_idx].text = text
-    #     add_table_borders(new_table)
-    #
-    #     # Insert a second heading and third table with top 50%
-    #     doc.add_paragraph("बिनशेती जामिन - टॉप 50% (प्रती चौ.मी. नुसार)")
-    #     top_table = doc.add_table(rows=1, cols=len(header))
-    #     for c_idx, text in enumerate(header):
-    #         top_table.rows[0].cells[c_idx].text = text
-    #     for r in top_half:
-    #         cells = top_table.add_row().cells
-    #         for c_idx, text in enumerate(r):
-    #             cells[c_idx].text = text
-    #     add_table_borders(top_table)
-    #
-    #     # Compute average of 'प्रती चौ.मी.' from top_half
-    #     if top_half:
-    #         avg_value = sum(to_float_safe(r[col_idx_prati_chou_mi]) for r in top_half) / len(top_half)
-    #     else:
-    #         avg_value = 0.0
-    #
-    #     doc.add_paragraph(f"Average प्रती चौ.मी. = {avg_value:.2f}")
-    #
-    #     # Overwrite the same output file (or choose a new name if desired)
-    #     doc.save(word_file_path)
-    #
-    # # To run in future, uncomment:
-    # # future_filter_and_aggregate(WORD_OUTPUT_FILE)
+def future_filter_and_aggregate(word_file_path: str):
+    """Filter rows by 'प्रकार' == 'बिनशेती जमिन', create a new table under the previous
+    table with same formatting, sort by 'प्रती चौ.मी.' descending, keep top 50% (rounding up),
+    compute average of 'प्रती चौ.मी.' and append it. Assumes first table has a merged title row,
+    header row at index 1, number row at index 2, and data from index 3 onwards."""
+
+    doc = Document(word_file_path)
+
+    if not doc.tables:
+        print("No tables found in the document for future processing.")
+        return
+
+    base_table = doc.tables[0]
+
+    # Build a list of rows (as lists of text) and detect column indices
+    rows_text = []
+    for r_idx, row in enumerate(base_table.rows):
+        cell_texts = [cell.text.strip() for cell in row.cells]
+        rows_text.append(cell_texts)
+
+    if len(rows_text) < 2:
+        print("Base table does not contain enough rows for header/data.")
+        return
+
+    # Use row index 1 as the visual header row, but determine column indices by
+    # the known CSV export order (headers defined in export_csv) to avoid label mismatches.
+    visual_header = rows_text[1]
+    kept_headers = [
+        "Serial Number", "(2) Year", "(3) Sub Registrar Number", "(4) Dast Kramank",
+        "(5) Registration Date", "(6) Document Type", "(7) Survey Number",
+        "(8) Area (sq meters)", "(9) Area (Hectares)", "(10) Stamp Duty",
+        "(11) Rate per SqM", "(12) Rate per Guntha", "(13) Rate per Ha",
+        "प्रकार"
+    ]
+    # Determine column indices by position in kept_headers
+    try:
+        col_idx_prakar = kept_headers.index("प्रकार")
+        col_idx_prati_chou_mi = kept_headers.index("(11) Rate per SqM")
+    except ValueError:
+        print("Internal header mapping failed; please verify export_csv headers.")
+        return
+
+    data_rows = rows_text[3:]
+
+    # Filter by 'प्रकार' == 'बिनशेती जमिन'
+    filtered = [
+        r for r in data_rows
+        if len(r) > max(col_idx_prakar, col_idx_prati_chou_mi) and r[col_idx_prakar] == 'बिनशेती जमिन'
+    ]
+
+    # Convert 'प्रती चौ.मी.' to float for sorting
+    def to_float_safe(s):
+        s_clean = re.sub(r"[^0-9.]", "", s or "")
+        try:
+            return float(s_clean) if s_clean else 0.0
+        except ValueError:
+            return 0.0
+
+    filtered.sort(key=lambda r: to_float_safe(r[col_idx_prati_chou_mi]), reverse=True)
+
+    # Keep top 50% rows (round up, at least 1 if any exist)
+    n = len(filtered)
+    keep_n = max(1, math.ceil(n * 0.5)) if n > 0 else 0
+    top_half = filtered[:keep_n]
+
+    # Insert a heading and a new table for filtered rows under the original table
+    doc.add_paragraph("बिनशेती जमिन - फिल्टर केलेले")
+    new_table = doc.add_table(rows=1, cols=len(visual_header))
+    new_table.style = base_table.style
+    # Copy header
+    for c_idx, text in enumerate(visual_header):
+        new_table.rows[0].cells[c_idx].text = text
+    # Add rows
+    for r in filtered:
+        cells = new_table.add_row().cells
+        for c_idx, text in enumerate(r[:len(visual_header)]):
+            cells[c_idx].text = text
+    add_table_borders(new_table)
+
+    # Insert a second heading and third table with top 50%
+    doc.add_paragraph("बिनशेती जमिन - टॉप 50% (प्रती चौ.मी. नुसार)")
+    top_table = doc.add_table(rows=1, cols=len(visual_header))
+    top_table.style = base_table.style
+    for c_idx, text in enumerate(visual_header):
+        top_table.rows[0].cells[c_idx].text = text
+    for r in top_half:
+        cells = top_table.add_row().cells
+        for c_idx, text in enumerate(r[:len(visual_header)]):
+            cells[c_idx].text = text
+    add_table_borders(top_table)
+
+    # Compute average of 'प्रती चौ.मी.' from top_half
+    if top_half:
+        avg_value = sum(to_float_safe(r[col_idx_prati_chou_mi]) for r in top_half) / len(top_half)
+    else:
+        avg_value = 0.0
+
+    doc.add_paragraph(f"Average प्रती चौ.मी. = {avg_value:.2f}")
+
+    # Overwrite the same output file
+    doc.save(word_file_path)
 
 
 if __name__ == "__main__":
