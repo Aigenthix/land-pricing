@@ -57,8 +57,8 @@ def get_multipage_extraction_prompt():
     -   `dast_kramank_full`: The full value of 'दस्त क्रमांक'.
     -   `registration_date`: The value for '(10)दस्त नोंदणी केल्याचा दिनांक'.
     -   `document_type`: The value for '(1)विलेखाचा प्रकार'.
-    -   `survey_number`: The number inside the double parentheses `((...))` from section (4),
-        like 'Survey Number'. Extract only the numerical value.
+    -   `survey_number`: All the numbers inside the double parentheses `((...))` from section (4),
+        like 'Survey Number'. Some numbers can have parts to them (for example 1ब, 2ब)
     -   `area_sq_meter`: The value for '(5)क्षेत्रफळ'. VERY IMPORTANT: If the unit is
         'चौ.फुट' (Square Feet) or 'चौ. फूट', convert it to Square Meters by multiplying by
         0.092903. If the unit is 'हेक्टर' (Hectare), convert to Square Meters by multiplying
@@ -68,6 +68,7 @@ def get_multipage_extraction_prompt():
     -   `prakar`: Analyze the text in section '(4) भू-मापन...' and related context. If it contains
         the Marathi word 'सदनिका' or mentions चौ.फूट, set `prakar` to 'सदनिका'. Otherwise set it to
         'बिनशेती जमिन'.
+    -   `amount`: The value for '(2) मोबदला'. Return only the numeric value (no currency symbols).
 
     Return ONLY the JSON array and nothing else.
     """
@@ -105,6 +106,7 @@ def process_multipage_pdf(pdf_path: pathlib.Path, model, prompt: str):
         for i, data in enumerate(list_of_data):
             area_sqm = clean_and_convert_to_float(data.get("area_sq_meter"))
             stamp_duty = clean_and_convert_to_float(data.get("stamp_duty"))
+            amount = clean_and_convert_to_float(data.get("amount"))
 
             hectares = area_sqm / 10000 if area_sqm > 0 else 0
             rate_per_sqm = stamp_duty / area_sqm if area_sqm > 0 else 0
@@ -126,6 +128,7 @@ def process_multipage_pdf(pdf_path: pathlib.Path, model, prompt: str):
                 "rate_per_guntha": f"{rate_per_guntha:.2f}",
                 "rate_per_ha": f"{rate_per_ha:.2f}",
                 "prakar": data.get("prakar", "N/A"),
+                "amount": f"{amount:.2f}",
                 "source_file": pdf_path.name,
                 "page_record_num": i + 1,
             }
@@ -147,7 +150,7 @@ def export_csv(records_by_file, csv_output: str):
         "(5) Registration Date", "(6) Document Type", "(7) Survey Number",
         "(8) Area (sq meters)", "(9) Area (Hectares)", "(10) Stamp Duty",
         "(11) Rate per SqM", "(12) Rate per Guntha", "(13) Rate per Ha",
-        "प्रकार", "Source PDF", "Record # in PDF"
+        "प्रकार", "Amount", "Source PDF", "Record # in PDF"
     ]
 
     with open(csv_output, "w", newline="", encoding="utf-8") as csvfile:
@@ -161,7 +164,7 @@ def export_csv(records_by_file, csv_output: str):
                 rec["registration_date"], rec["document_type"], rec["survey_number"],
                 rec["area_sq_meter"], rec["area_hectares"], rec["stamp_duty"],
                 rec["rate_per_sqm"], rec["rate_per_guntha"], rec["rate_per_ha"],
-                rec.get("prakar", "N/A"), rec["source_file"], rec["page_record_num"]
+                rec.get("prakar", "N/A"), rec.get("amount", ""), rec["source_file"], rec["page_record_num"]
             ]
             writer.writerow(row)
             serial_number += 1
@@ -200,7 +203,15 @@ def export_word_from_csv(csv_path: str, template_path: str, output_path: str):
     # Append each DataFrame row to the Word table
     for _, row in df.iterrows():
         cells = table.add_row().cells
-        for i, value in enumerate(row):
+        # Write up to the number of columns available in the template table
+        max_cols = min(len(cells), len(row))
+        if len(row) > len(cells):
+            # Warn once per row if template has fewer columns than data
+            # e.g., template has 14 columns but data has 15 (includes 'Amount')
+            print(
+                f"Warning: template has {len(cells)} columns but data row has {len(row)}; extra columns will be truncated."
+            )
+        for i, value in enumerate(row[:max_cols]):
             cells[i].text = "" if pd.isna(value) else str(value)
 
     # Add borders
@@ -280,7 +291,7 @@ def future_filter_and_aggregate(word_file_path: str):
         "(5) Registration Date", "(6) Document Type", "(7) Survey Number",
         "(8) Area (sq meters)", "(9) Area (Hectares)", "(10) Stamp Duty",
         "(11) Rate per SqM", "(12) Rate per Guntha", "(13) Rate per Ha",
-        "प्रकार"
+        "प्रकार", "Amount"
     ]
     # Determine column indices by position in kept_headers
     try:
