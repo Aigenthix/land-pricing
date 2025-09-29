@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file
 import os
+import re
 from dotenv import load_dotenv
 from method1 import process_data
 from method2 import get_land_rate
@@ -93,12 +94,33 @@ def process():
     session['method1_result_en'] = result_en
     session['method1_result_mr'] = result_mr
     session['method1_table'] = table.to_html(classes='data', header=True)
+    # Try to parse and store average rate for recommendations (Tab 3)
+    method1_rate_avg = None
+    try:
+        # Examples: "Rs. 20970.19/- per sq. m." or "रु. 20970.19/- प्रती चौ. मी." or "Average दर प्रती चौ.मी. = 20970.19"
+        txt_en = result_en or ''
+        txt_mr = result_mr or ''
+        m = re.search(r"Rs?\.?\s*([\d,]+\.?\d*)\/-?\s*per\s*sq\.?\s*m", txt_en, re.IGNORECASE)
+        if not m:
+            m = re.search(r"रु\.?\s*([\d,]+\.?\d*)\/-?\s*प्रती\s*चौ\.?\s*मी\.", txt_mr)
+        if not m:
+            # Marathi Average line variant: Average दर प्रती चौ.मी. = 12345.67
+            m = re.search(r"Average\s*दर[^=]*=\s*([\d,]+\.?\d*)", txt_mr)
+        if not m:
+            m = re.search(r"Average\s*दर[^=]*=\s*([\d,]+\.?\d*)", txt_en, re.IGNORECASE)
+        if m:
+            method1_rate_avg = float(m.group(1).replace(',', ''))
+    except Exception:
+        method1_rate_avg = None
+    if method1_rate_avg is not None:
+        session['method1_rate_avg'] = method1_rate_avg
     
     return jsonify({
         "status": "success",
         "result_en": result_en,
         "result_mr": result_mr,
-        "table": table.to_html(classes='data', header=True)
+        "table": table.to_html(classes='data', header=True),
+        "rate_avg": method1_rate_avg
     })
 
 @app.route('/process_index2', methods=['POST'])
@@ -135,11 +157,34 @@ def process_index2():
         # Store results
         session['method1_index2_html'] = html
         session['method1_index2_docx_path'] = tmp_docx_path
+        # Extract and store average rate from HTML for Tab 3 recommendation
+        method1_rate_avg = None
+        try:
+            # Try multiple patterns in HTML
+            m = re.search(r"Average\s*दर[^=]*=\s*([\d,]+\.?\d*)", html)
+            if not m:
+                m = re.search(r"Rs?\.?\s*([\d,]+\.?\d*)\/-?\s*per\s*sq\.?\s*m", html, re.IGNORECASE)
+            if not m:
+                m = re.search(r"रु\.?\s*([\d,]+\.?\d*)\/-?\s*प्रती\s*चौ\.?\s*मी\.", html)
+            if not m:
+                # as a last resort, pick the largest number-like token
+                nums = re.findall(r"[\d,]+\.?\d*", html)
+                nums_f = [float(x.replace(',', '')) for x in nums if x and x[0].isdigit()]
+                if nums_f:
+                    method1_rate_avg = max(nums_f)
+                else:
+                    method1_rate_avg = None
+            else:
+                method1_rate_avg = float(m.group(1).replace(',', ''))
+        except Exception:
+            method1_rate_avg = None
+        if method1_rate_avg is not None:
+            session['method1_rate_avg'] = method1_rate_avg
 
         # Step 4: Done
         processing_status["index2_progress"] = {"step": 4, "message": "Done"}
 
-        return jsonify({"status": "success", "html": html, "download": bool(tmp_docx_path)})
+        return jsonify({"status": "success", "html": html, "download": bool(tmp_docx_path), "rate_avg": method1_rate_avg})
     except Exception as e:
         processing_status["index2_progress"] = {"step": 0, "message": f"Error: {str(e)}"}
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -227,6 +272,13 @@ def process_method2_new():
 @app.route('/get_method2_progress')
 def get_method2_progress():
     return jsonify(processing_status.get("method2_progress", {"step": 0, "message": "Not started"}))
+
+@app.route('/get_method1_rate')
+def get_method1_rate():
+    if not session.get('logged_in'):
+        return jsonify({"status": "error", "message": "Not logged in"}), 401
+    rate = session.get('method1_rate_avg')
+    return jsonify({"status": "success", "rate_avg": rate})
 
 @app.route('/index_method1_results')
 def index_with_method1_results():

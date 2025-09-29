@@ -357,7 +357,7 @@
         }
     });
 
-    function compareRates() {
+    async function compareRates() {
         console.log('Compare rates function called');
         
         // Get Method 1 results (from average text, not table)
@@ -425,6 +425,18 @@
         var resultsDiv = document.getElementById('method3Results');
         console.log('Results div found:', resultsDiv);
         
+        // If Method 1 rate still not found, fetch from backend session
+        if (!method1Rate) {
+            try {
+                const r = await fetch('/get_method1_rate');
+                const j = await r.json();
+                if (j && j.status === 'success' && j.rate_avg) {
+                    method1Rate = parseFloat(j.rate_avg);
+                    console.log('Method 1 rate fetched from backend:', method1Rate);
+                }
+            } catch(e) {}
+        }
+
         if (!method1Rate && !method2Rate) {
             alert('⚠️ No analysis data available. Please run at least one method first.');
             resultsDiv.innerHTML = '<div style="color: red; font-weight: bold;">⚠️ No analysis data available. Please run at least one method first.</div>';
