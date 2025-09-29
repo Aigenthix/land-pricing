@@ -766,12 +766,18 @@ class IGRSubzoneScraper:
                     soup_local = BeautifulSoup(f"<table>{html_local}</table>", 'html.parser')
                     trs = soup_local.find_all('tr')
                     out = []
-                    # header is first tr; data rows start at index 1; clicking needs nth-child(index+1)
-                    for i, tr in enumerate(trs[1:]):
+                    for j, tr in enumerate(trs):
+                        if j == 0:
+                            continue  # header row
                         tds = tr.find_all('td')
                         if len(tds) < 3:
                             continue
-                        click_row = i + 2  # account for header row
+                        # include only rows where first td has a SurveyNo link
+                        first_td = tds[0]
+                        has_link = first_td.find('a') is not None and ('SurveyNo' in first_td.get_text())
+                        if not has_link:
+                            continue
+                        click_row = j + 1  # nth-child index in live table
                         col2_text = tds[1].get_text(strip=True)
                         col3_rate = tds[2].get_text(strip=True)
                         out.append((click_row, col2_text, col3_rate))
@@ -779,21 +785,35 @@ class IGRSubzoneScraper:
                 except Exception:
                     return []
 
+            # Helper: signature of the first data row (col2 text) to detect page changes
+            def _first_row_sig() -> str:
+                rows = _parse_rows()
+                if not rows:
+                    return ''
+                # rows are (click_row, col2, col3)
+                return rows[0][1]
+
             # Searching utility
-            def _textbox_has_all_surveys() -> Tuple[bool, str]:
+            def _textbox_has_all_surveys(prev_value: str) -> Tuple[bool, str]:
                 try:
-                    self.page.wait_for_selector('textarea', timeout=15000)
+                    self.page.wait_for_selector('textarea', timeout=30000)
                 except Exception:
                     pass
-                try:
-                    self.page.wait_for_function("() => { const ta = document.querySelector('textarea'); return ta && ta.value && ta.value.trim().length > 0; }", timeout=15000)
-                except Exception:
-                    pass
-                time.sleep(0.8)
-                try:
-                    val = self.page.locator('textarea').first.input_value()
-                except Exception:
-                    val = ''
+                # Poll for up to ~30s until textarea value is non-empty and changed
+                val = ''
+                for _ in range(60):
+                    try:
+                        # Scroll into view to ensure rendering
+                        try:
+                            self.page.locator('textarea').first.scroll_into_view_if_needed()
+                        except Exception:
+                            pass
+                        val = self.page.locator('textarea').first.input_value()
+                    except Exception:
+                        val = ''
+                    if val and val.strip() and val != prev_value:
+                        break
+                    time.sleep(0.5)
                 vnorm = (val or '').replace(' ', '')
                 needed = [sv.replace(' ', '') for sv in surveys]
                 ok = all(sv in vnorm for sv in needed)
@@ -803,8 +823,10 @@ class IGRSubzoneScraper:
             current_page = 1
             prev_html = ctx_tbl.locator(results_table_sel).inner_html()
             while True:
+                # Small settle before processing a page (esp. first page)
+                time.sleep(1.2)
                 rows = _parse_rows()
-                print(f"[Method2] SubZones: page {current_page} has {len(rows)} data rows")
+                print(f"[Method2] SubZones: page {current_page} has {len(rows)} data rows (with SurveyNo link)")
                 # Try each row on this page
                 found = False
                 for click_row, col2_text, col3_rate in rows:
@@ -816,9 +838,23 @@ class IGRSubzoneScraper:
                             link = row_loc.locator("td:nth-child(1) a")
                         if link.count() == 0:
                             continue
+                        # Ensure link is visible and scrolled into view
+                        try:
+                            link.first.scroll_into_view_if_needed()
+                        except Exception:
+                            pass
                         print(f"[Method2] Clicking SurveyNo at page {current_page}, row {click_row-1}")
+                        # Capture previous textarea value, if any
+                        try:
+                            prev_text_val = self.page.locator('textarea').first.input_value()
+                        except Exception:
+                            prev_text_val = ''
                         link.first.click()
-                        ok, text_val = _textbox_has_all_surveys()
+                        try:
+                            self.page.wait_for_load_state('networkidle', timeout=8000)
+                        except Exception:
+                            pass
+                        ok, text_val = _textbox_has_all_surveys(prev_text_val)
                         if ok:
                             print(f"[Method2] All surveys found in textbox for page {current_page}, row {click_row-1}")
                             return {
@@ -830,6 +866,8 @@ class IGRSubzoneScraper:
                             }
                         else:
                             print(f"[Method2] Surveys NOT all present for this row; continuing")
+                            # Small pause before the next row to avoid overlapping loads
+                            time.sleep(1.0)
                     except Exception:
                         continue
 
@@ -845,11 +883,13 @@ class IGRSubzoneScraper:
                     break
                 try:
                     print(f"[Method2] Going to SubZones page {next_page}")
+                    # capture current first-row signature before navigation
+                    pre_sig = _first_row_sig()
                     pager_link.first.click()
                 except Exception:
                     break
                 # Wait for grid to change
-                for _ in range(30):  # up to ~6s
+                for _ in range(60):  # up to ~12s
                     time.sleep(0.2)
                     try:
                         curr_html = ctx_tbl.locator(results_table_sel).inner_html()
@@ -858,7 +898,13 @@ class IGRSubzoneScraper:
                             break
                     except Exception:
                         pass
-                time.sleep(0.6)
+                # Additionally wait for first row signature to change (safer than html diff alone)
+                for _ in range(40):  # up to ~8s
+                    sig = _first_row_sig()
+                    if sig and sig != pre_sig:
+                        break
+                    time.sleep(0.2)
+                time.sleep(1.2)
                 current_page = next_page
 
             return {"error": "Exhausted all SubZones pages and rows without finding all surveys"}
