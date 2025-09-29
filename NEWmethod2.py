@@ -7,7 +7,8 @@ except Exception:
 import re
 import time
 from io import BytesIO
-from typing import List, Tuple, Optional, Dict
+import sys
+from typing import List, Tuple, Optional, Dict, Callable
 
 from docx import Document
 from bs4 import BeautifulSoup
@@ -154,6 +155,13 @@ def _consider_survey_number(raw: str) -> Optional[str]:
     txt = _clean_text(raw)
     if not txt:
         return None
+
+    def _emit_status(self, msg: str):
+        # Simple status hook for UI/console
+        try:
+            print(f"[Status] {msg}")
+        except Exception:
+            pass
     # Keep only first 2 segments
     parts = [p.strip() for p in txt.split('/') if p.strip()]
     if not parts:
@@ -200,8 +208,9 @@ def extract_admin_and_surveys_from_docx(file_bytes: bytes) -> Tuple[Optional[str
 # ----------------------
 
 class IGRSubzoneScraper:
-    def __init__(self, headless: bool = True):
+    def __init__(self, headless: bool = True, progress_cb: Optional[Callable[[str], None]] = None):
         self.headless = headless
+        self.progress_cb = progress_cb
         self.playwright = None
         self.browser = None
         self.page = None
@@ -232,6 +241,23 @@ class IGRSubzoneScraper:
                 if self.playwright:
                     print('[Method2] Stopping Playwright')
                     self.playwright.stop()
+
+    def _emit_status(self, msg: str):
+        """Emit lightweight status updates for UI/console."""
+        try:
+            print(f"[Status] {msg}")
+            try:
+                sys.stdout.flush()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        # Forward to external progress callback if provided (for frontend live updates)
+        try:
+            if callable(self.progress_cb):
+                self.progress_cb(msg)
+        except Exception:
+            pass
 
     # --- Utilities ---
     def _find_context_with_selector(self, selector: str, timeout: int = 30000):
@@ -663,6 +689,7 @@ class IGRSubzoneScraper:
     # --- Main flow ---
     def run(self, district: str, year_label: str, taluka: str, village: str, surveys: List[str], translate_admin: bool = True) -> Dict:
         # Navigate with district param (use English name in URL via translation)
+        self._emit_status('Navigating IGR')
         district_param = _translate_to_en(district) if translate_admin else district
         district_param = district_param or district
         # Ensure URL-safe
@@ -675,11 +702,15 @@ class IGRSubzoneScraper:
             self.page.wait_for_load_state('networkidle', timeout=30000)
         except Exception:
             pass
+        # Page is loaded
+        self._emit_status('Inputting Taluka, Village and Year values')
 
         # Select year; if not found, fallback to base URL and manual district selection
         print('[Method2] Waiting for Year dropdown...')
         try:
             self._select_dropdown_label('#ctl00_ContentPlaceHolder5_ddlYear', year_label)
+            # Year selected
+            self._emit_status('Inputting Taluka, Village and Year values')
         except Exception as e:
             print(f"[Method2] Year dropdown not found after direct URL. Fallback: reload base and select district. Reason: {e}")
             base_url = 'https://igreval.maharashtra.gov.in/eASR2.0/eASRCommon.aspx'
@@ -692,6 +723,7 @@ class IGRSubzoneScraper:
                 return {"error": "Could not select district from page"}
             # After district change, the year dropdown should be present
             self._select_dropdown_label('#ctl00_ContentPlaceHolder5_ddlYear', year_label)
+            self._emit_status('Inputting Taluka, Village and Year values')
 
         # Select taluka
         if translate_admin:
@@ -706,6 +738,8 @@ class IGRSubzoneScraper:
             print(f"[Method2] Selecting taluka (no translation): '{taluka}'")
             self._select_dropdown_label('#ctl00_ContentPlaceHolder5_ddlTaluka', taluka)
         time.sleep(1.0)
+        # Taluka selected
+        self._emit_status('Inputting Taluka, Village and Year values')
 
         # Wait for village dropdown to be ready
         print('[Method2] Waiting for village dropdown to populate...')
@@ -741,6 +775,8 @@ class IGRSubzoneScraper:
             except Exception:
                 self._select_dropdown_label('#ctl00_ContentPlaceHolder5_ddlVillage', village)
         time.sleep(1.0)
+        # Village selected; moving to matching
+        self._emit_status('Matching for Survey Numbers')
 
         # --- New approach: iterate SubZones rows across pages and validate textarea ---
         print('[Method2] Scanning SubZones rows across pages (no Survey search)...')
@@ -857,11 +893,20 @@ class IGRSubzoneScraper:
                         ok, text_val = _textbox_has_all_surveys(prev_text_val)
                         if ok:
                             print(f"[Method2] All surveys found in textbox for page {current_page}, row {click_row-1}")
+                            self._emit_status('Done')
+                            try:
+                                time.sleep(0.8)
+                            except Exception:
+                                pass
+                            # Print final answer without mentioning column index or surveys list
+                            try:
+                                print(f"Rate: {col3_rate}")
+                            except Exception:
+                                pass
                             return {
                                 "status": "success",
                                 "matched_subzone": col2_text,
                                 "rate_value": col3_rate,
-                                "surveys_checked": surveys,
                                 "textbox_value": text_val,
                             }
                         else:
@@ -1155,7 +1200,7 @@ class IGRSubzoneScraper:
 # Public API
 # ----------------------
 
-def process_igr_from_doc(file_bytes: bytes, filename: str, year_label: str, district_override: Optional[str] = None, taluka_override: Optional[str] = None, village_override: Optional[str] = None) -> Dict:
+def process_igr_from_doc(file_bytes: bytes, filename: str, year_label: str, district_override: Optional[str] = None, taluka_override: Optional[str] = None, village_override: Optional[str] = None, progress_cb: Optional[Callable[[str], None]] = None) -> Dict:
     """
     Process a Word/PDF file and fetch rate based on IGR SubZones matching.
     - filename: used to branch parsing logic. Currently supports .docx only.
@@ -1176,5 +1221,5 @@ def process_igr_from_doc(file_bytes: bytes, filename: str, year_label: str, dist
     if not district or not taluka or not village or not surveys:
         return {"error": "Could not extract district/taluka/village/surveys from the document"}
 
-    with IGRSubzoneScraper(headless=False) as scraper:
+    with IGRSubzoneScraper(headless=True, progress_cb=progress_cb) as scraper:
         return scraper.run(district=district, year_label=year_label, taluka=taluka, village=village, surveys=surveys, translate_admin=False)

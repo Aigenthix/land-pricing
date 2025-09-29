@@ -185,6 +185,21 @@ def process_method2_new():
 
         # Step 2: Navigating IGR (start)
         processing_status["method2_progress"] = {"step": 2, "message": "Navigating IGR"}
+
+        # Live progress callback to update frontend loading circle
+        def _method2_progress_cb(msg: str):
+            try:
+                mapping = {
+                    'Navigating IGR': 2,
+                    'Inputting Taluka, Village and Year values': 3,
+                    'Matching for Survey Numbers': 4,
+                    'Done': 6,
+                }
+                step = mapping.get(msg, processing_status["method2_progress"].get("step", 0))
+                processing_status["method2_progress"] = {"step": step, "message": msg}
+            except Exception:
+                pass
+
         result = process_igr_from_doc(
             file_bytes=file_bytes,
             filename=filename,
@@ -192,24 +207,16 @@ def process_method2_new():
             district_override=district_override,
             taluka_override=taluka_override,
             village_override=village_override,
+            progress_cb=_method2_progress_cb,
         )
 
-        # Heuristic progress updates based on flow
+        # Finalize progress based on result
         if 'error' in result:
             processing_status["method2_progress"] = {"step": 0, "message": f"Error: {result['error']}"}
             return jsonify({"status": "error", "message": result['error']}), 500
-
-        # Step 3: Searching Survey No.
-        processing_status["method2_progress"] = {"step": 3, "message": "Searching Survey No."}
-
-        # Step 4: Matching SubZones
-        processing_status["method2_progress"] = {"step": 4, "message": "Matching SubZones"}
-
-        # Step 5: Verifying Surveys
-        processing_status["method2_progress"] = {"step": 5, "message": "Verifying Surveys"}
-
-        # Step 6: Done
-        processing_status["method2_progress"] = {"step": 6, "message": "Done"}
+        else:
+            # Ensure Done status is reflected
+            processing_status["method2_progress"] = {"step": 6, "message": "Done"}
 
         session['method2_result'] = result
         return jsonify({"status": "success", "result": result})
