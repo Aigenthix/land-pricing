@@ -259,7 +259,7 @@
         progressWrap.style.display = 'block';
         spinner.classList.remove('hidden');
 
-        // Start live polling
+        // Start live polling for status
         let poll2 = setInterval(() => {
             fetch('/get_method2_progress')
             .then(r => r.json())
@@ -284,15 +284,23 @@
         .then(data => {
             if (data.status === 'success') {
                 const res = data.result;
-                resultsDiv.innerHTML = `
-                    <div class="card">
-                        <p><strong>Matched Subzone:</strong> ${res.matched_subzone}</p>
-                        <p><strong>Rate (Column 3):</strong> ${res.rate_value}</p>
-                        <p><strong>Surveys Checked:</strong> ${res.surveys_checked.join(', ')}</p>
-                    </div>
-                `;
-                // Optional: store for recommendations
-                try { window.method2Rate = parseFloat(res.rate_value.toString().replace(/,/g, '')); } catch(e) {}
+                // Show 'Done' briefly, then render result and hide progress UI
+                progressText.textContent = 'Done';
+                spinner.classList.add('hidden');
+                setTimeout(() => {
+                    resultsDiv.innerHTML = `
+                        <div class="card">
+                            <p><strong>Matched Subzone:</strong> ${res.matched_subzone}</p>
+                            <p><strong>Rate:</strong> ${res.rate_value}</p>
+                        </div>
+                    `;
+                    // Hide progress after showing Done
+                    const progressWrap = document.getElementById('method2Progress');
+                    if (progressWrap) progressWrap.style.display = 'none';
+                    resultsDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    // Optional: store for recommendations
+                    try { window.method2Rate = parseFloat(res.rate_value.toString().replace(/,/g, '')); } catch(e) {}
+                }, 800);
             } else {
                 resultsDiv.innerHTML = `<div class="card" style="color:red;">Error: ${data.message}</div>`;
                 window.method2Rate = null;
