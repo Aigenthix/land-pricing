@@ -243,76 +243,66 @@
         });
     }
 
-    // AJAX form submission for Method 2
+    // AJAX form submission for Method 2 (NEW)
     function submitMethod2(event) {
         event.preventDefault();
-        
-        // Check if image is still processing before allowing submission
-        fetch('/check_processing_status')
-        .then(response => response.json())
-        .then(data => {
-            if (data.image_processing) {
-                alert('Image is still being processed. Please wait for the assessment value to be detected.');
-                return;
-            }
-            
-            const form = document.getElementById('method2Form');
-            const formData = new FormData(form);
-            
-            // Show progress tracking
-            const progressSteps = document.getElementById('progressSteps');
-            progressSteps.style.display = 'block';
-            document.getElementById('processingMessage2').style.display = 'block';
-            
-            // Start real-time progress tracking
-            trackScrapingProgress();
-            
-            // Hide any previous results
-            const resultsDiv = document.querySelector('#Method2 .results');
-            if (resultsDiv) {
-                resultsDiv.style.display = 'none';
-            }
-            
-            // Submit form via AJAX
-            fetch('/process_method2', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                // Hide progress tracking
-                progressSteps.style.display = 'none';
-                document.getElementById('processingMessage2').style.display = 'none';
-                
-                if (data.status === 'success') {
-                    // Update results in the current tab without redirecting
-                    const result = data.result;
-                    resultsDiv.innerHTML = `
-                        <h3>Land Rate Results:</h3>
-                        <p><strong>Assessment Range:</strong> ${result.range}</p>
-                        <p><strong>Rate per Hectare:</strong> ₹${result.rate_hectares}</p>
-                        <p><strong>Rate per Square Meter:</strong> ₹${result.rate_sqm.toFixed(2)}</p>
-                        <p><strong>Area Value Used:</strong> ${result.area_value}</p>
-                    `;
-                    resultsDiv.style.display = 'block';
-                    
-                    // Store Method 2 rate for recommendation system
-                    window.method2Rate = result.rate_sqm;
-                } else {
-                    resultsDiv.innerHTML = `<p style="color: red;">Error: ${data.message}</p>`;
-                    resultsDiv.style.display = 'block';
-                    
-                    // Clear stored rate on error
-                    window.method2Rate = null;
+
+        const form = document.getElementById('method2Form');
+        const formData = new FormData(form);
+        const progressWrap = document.getElementById('method2Progress');
+        const progressText = document.getElementById('method2StepText');
+        const spinner = document.getElementById('method2Spinner');
+        const resultsDiv = document.getElementById('method2Results');
+
+        // Reset UI
+        resultsDiv.innerHTML = '';
+        progressWrap.style.display = 'block';
+        spinner.classList.remove('hidden');
+
+        // Start live polling
+        let poll2 = setInterval(() => {
+            fetch('/get_method2_progress')
+            .then(r => r.json())
+            .then(d => {
+                if (d && d.message) {
+                    progressText.textContent = d.message;
+                    if (d.step >= 6 || (d.message && d.message.toLowerCase().includes('done'))) {
+                        spinner.classList.add('hidden');
+                        clearInterval(poll2);
+                    }
                 }
             })
-            .catch(error => {
-                console.error('Error:', error);
-                progressSteps.style.display = 'none';
-                document.getElementById('processingMessage2').style.display = 'none';
-                resultsDiv.innerHTML = '<p style="color: red;">An error occurred while processing the request.</p>';
-                resultsDiv.style.display = 'block';
-            });
+            .catch(() => {});
+        }, 500);
+
+        // Submit to new backend
+        fetch('/process_method2_new', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                const res = data.result;
+                resultsDiv.innerHTML = `
+                    <div class="card">
+                        <p><strong>Matched Subzone:</strong> ${res.matched_subzone}</p>
+                        <p><strong>Rate (Column 3):</strong> ${res.rate_value}</p>
+                        <p><strong>Surveys Checked:</strong> ${res.surveys_checked.join(', ')}</p>
+                    </div>
+                `;
+                // Optional: store for recommendations
+                try { window.method2Rate = parseFloat(res.rate_value.toString().replace(/,/g, '')); } catch(e) {}
+            } else {
+                resultsDiv.innerHTML = `<div class="card" style="color:red;">Error: ${data.message}</div>`;
+                window.method2Rate = null;
+            }
+        })
+        .catch(err => {
+            resultsDiv.innerHTML = `<div class=\"card\" style=\"color:red;\">Error: ${err}</div>`;
+        })
+        .finally(() => {
+            spinner.classList.add('hidden');
         });
     }
 
@@ -829,61 +819,50 @@
     <div id="Method2" class="tabcontent">
         <form id="method2Form" enctype="multipart/form-data" onsubmit="submitMethod2(event)">
             <div class="form-group">
-                <label>District (जिल्हा)</label>
-                <input type="text" name="district" placeholder="e.g., Thane" required>
+                <label>Upload Word/PDF (दस्तऐवज अपलोड करा)</label>
+                <input type="file" name="input_file" accept=".docx,.pdf" required>
             </div>
             <div class="form-group">
                 <label>Year (वर्ष)</label>
                 <select name="year" required>
-                    <option value="">Select Year</option>
-                    <option value="2025-2026">2025-2026</option>
-                    <option value="2024-2025">2024-2025</option>
-                    <option value="2023-2024">2023-2024</option>
-                    <option value="2022-2023">2022-2023</option>
-                    <option value="2021-2022">2021-2022</option>
-                    <option value="2020-2021">2020-2021</option>
+                    <option value="" disabled selected>Select Year</option>
+                    <option>2015-2016</option>
+                    <option>2016-2017</option>
+                    <option>2017-2018</option>
+                    <option>2018-2019</option>
+                    <option>2019-2020</option>
+                    <option>2020-2021</option>
+                    <option>2021-2022</option>
+                    <option>2022-2023</option>
+                    <option>2023-2024</option>
+                    <option>2024-2025</option>
+                    <option>2025-2026</option>
                 </select>
             </div>
             <div class="form-group">
+                <label>District (जिल्हा)</label>
+                <input type="text" name="district" placeholder="e.g., Thane" required>
+            </div>
+            <div class="form-group">
                 <label>Taluka (तालुका)</label>
-                <input type="text" name="taluka" placeholder="e.g., Ambarnath" required>
+                <input type="text" name="taluka" placeholder="e.g., Thane" required>
             </div>
             <div class="form-group">
-                <label>Village (गाव)</label>
-                <input type="text" name="village" placeholder="e.g., Ambhe" required>
+                <label>Village (मौजे)</label>
+                <input type="text" name="village" placeholder="e.g., Majiwade" required>
             </div>
             <div class="form-group">
-                <label>Upload 7/12 Record of Right (७/१२ अधिकार अभिलेख)</label>
-                <input type="file" name="record_file" accept=".jpg,.jpeg,.png,.pdf,.docx" onchange="uploadToColab(this)">
-            </div>
-            <div class="form-group">
-                <label>Detected Assessment Value (शोधलेले मूल्यांकन मूल्य)</label>
-                <input type="number" name="area_value" step="0.01" placeholder="Upload 7/12 record to detect value" readonly id="detectedAssessmentValue">
-            </div>
-            <div class="form-group">
-                <button type="submit" id="processButton2" disabled>Get Land Rate (जमीन दर मिळवा)</button>
-                <div id="processingMessage2">
-                    <div id="progressSteps" style="display: none;">
-                        <div class="progress-step" id="currentStep">
-                            <div class="spinner" id="progressSpinner"></div>
-                            <span id="stepText">Starting...</span>
-                        </div>
-                    </div>
-                </div>
+                <button type="submit" id="processButton2">Process (प्रक्रिया)</button>
             </div>
         </form>
-        <div class="results">
-            {% if method2_result %}
-                <h3>Land Rate Results:</h3>
-                <p><strong>Assessment Value:</strong> {{ method2_result.area_value }}</p>
-                <p><strong>Assessment Range:</strong> {{ method2_result.range }}</p>
-                <p><strong>Rate per Hectare:</strong> Rs. {{ method2_result.rate_hectares | round(2) }}</p>
-                <p><strong>Rate per Square Meter:</strong> Rs. {{ method2_result.rate_sqm | round(2) }}</p>
-            {% endif %}
-            {% if method2_error %}
-                <p style="color: red;">Error: {{ method2_error }}</p>
-            {% endif %}
+        <!-- Progress UI for Method 2 -->
+        <div id="method2Progress" style="display:none; margin-top:10px;">
+            <div class="progress-step active">
+                <span id="method2StepText">Starting...</span>
+                <span class="spinner" id="method2Spinner"></span>
+            </div>
         </div>
+        <div class="results" id="method2Results"></div>
     </div>
 
     <!-- Method 3 Tab Content -->

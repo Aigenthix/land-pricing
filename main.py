@@ -8,6 +8,7 @@ import time
 import tempfile
 from Fin_plsplspls import RobustLandRecordOCRDocTR
 from NEWmethod1 import process_index2_pdf_to_html
+from NEWmethod2 import process_igr_from_doc
 
 load_dotenv()
 
@@ -15,7 +16,7 @@ load_dotenv()
 latest_value = {"val": None}
 
 # Global variable to track processing status
-processing_status = {"image_processing": False, "scraping_progress": {}, "index2_progress": {"step": 0, "message": "Not started"}}
+processing_status = {"image_processing": False, "scraping_progress": {}, "index2_progress": {"step": 0, "message": "Not started"}, "method2_progress": {"step": 0, "message": "Not started"}}
 
 # Initialize OCR processor globally
 ocr_processor = None
@@ -156,6 +157,69 @@ def download_index2_docx():
         return jsonify({"status": "error", "message": "No generated document available"}), 404
     # Use a friendly filename
     return send_file(path, as_attachment=True, download_name='index2_output.docx')
+
+@app.route('/process_method2_new', methods=['POST'])
+def process_method2_new():
+    if not session.get('logged_in'):
+        return jsonify({"status": "error", "message": "Not logged in"}), 401
+
+    if 'input_file' not in request.files:
+        return jsonify({"status": "error", "message": "No file uploaded"}), 400
+    if 'year' not in request.form:
+        return jsonify({"status": "error", "message": "Year is required"}), 400
+
+    input_file = request.files['input_file']
+    year = request.form['year']
+    # Optional admin overrides (user-provided)
+    district_override = request.form.get('district') or None
+    taluka_override = request.form.get('taluka') or None
+    village_override = request.form.get('village') or None
+    if not input_file or input_file.filename == '':
+        return jsonify({"status": "error", "message": "No file uploaded"}), 400
+
+    try:
+        # Step 1: Parsing document
+        processing_status["method2_progress"] = {"step": 1, "message": "Parsing document"}
+        file_bytes = input_file.read()
+        filename = input_file.filename
+
+        # Step 2: Navigating IGR (start)
+        processing_status["method2_progress"] = {"step": 2, "message": "Navigating IGR"}
+        result = process_igr_from_doc(
+            file_bytes=file_bytes,
+            filename=filename,
+            year_label=year,
+            district_override=district_override,
+            taluka_override=taluka_override,
+            village_override=village_override,
+        )
+
+        # Heuristic progress updates based on flow
+        if 'error' in result:
+            processing_status["method2_progress"] = {"step": 0, "message": f"Error: {result['error']}"}
+            return jsonify({"status": "error", "message": result['error']}), 500
+
+        # Step 3: Searching Survey No.
+        processing_status["method2_progress"] = {"step": 3, "message": "Searching Survey No."}
+
+        # Step 4: Matching SubZones
+        processing_status["method2_progress"] = {"step": 4, "message": "Matching SubZones"}
+
+        # Step 5: Verifying Surveys
+        processing_status["method2_progress"] = {"step": 5, "message": "Verifying Surveys"}
+
+        # Step 6: Done
+        processing_status["method2_progress"] = {"step": 6, "message": "Done"}
+
+        session['method2_result'] = result
+        return jsonify({"status": "success", "result": result})
+    except Exception as e:
+        processing_status["method2_progress"] = {"step": 0, "message": f"Error: {str(e)}"}
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/get_method2_progress')
+def get_method2_progress():
+    return jsonify(processing_status.get("method2_progress", {"step": 0, "message": "Not started"}))
 
 @app.route('/index_method1_results')
 def index_with_method1_results():
