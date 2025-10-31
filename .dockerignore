@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment files (we'll use env_file in docker-compose instead)
+# .env
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+README.md
+*.md
+
+# Test files
+test_*.py
+testDocs/
+
+# Temporary files
+*.log
+*.tmp
+tmp/
+temp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific (keep these if needed for the app)
+# Uncomment if you don't want to include these
+# index2/
+# 7_12 images/
+

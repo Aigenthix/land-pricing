@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  land-pricing-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: land-pricing-app
+    ports:
+      - "5001:5001"
+    environment:
+      # Port configuration
+      - PORT=5001
+      # Flask secret key (used for signing session cookies)
+      # Generate a secure key with: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+      # IMPORTANT: Change this in production! Use a secure random string.
+      - SECRET_KEY=${SECRET_KEY:-YkYpGXztTrRuP_o89ud1rl1Qc5kblE8zOnI0frZPBCk}
+      # Google API key for Gemini (optional, but required for OCR features)
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+    env_file:
+      - .env
+    volumes:
+      # Mount static and template files for development (optional)
+      # Uncomment if you want to edit files without rebuilding
+      # - ./static:/app/static:ro
+      # - ./templates:/app/templates:ro
+      # Mount index2 directory if needed
+      # - ./index2:/app/index2:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
