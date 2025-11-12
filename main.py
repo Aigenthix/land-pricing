@@ -7,7 +7,8 @@ from method2 import get_land_rate
 import threading
 import time
 import tempfile
-from Fin_plsplspls import RobustLandRecordOCRDocTR
+# Defer heavy OCR class import to save memory; import inside initialize_ocr
+RobustLandRecordOCRDocTR = None  # lazy import placeholder
 from NEWmethod1 import process_index2_pdf_to_html
 from NEWmethod2 import process_igr_from_doc
 
@@ -24,12 +25,19 @@ ocr_processor = None
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'your-secret-key-here')
+# Reject overly large uploads to prevent OOM (e.g., 15 MB)
+app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_UPLOAD_MB', '15')) * 1024 * 1024
 
 def initialize_ocr():
     """Initialize OCR processor on first use"""
     global ocr_processor
+    global RobustLandRecordOCRDocTR
     if ocr_processor is None:
         print("Initializing OCR processor...")
+        if RobustLandRecordOCRDocTR is None:
+            # Import here to avoid loading large ML stacks unless needed
+            from Fin_plsplspls import RobustLandRecordOCRDocTR as _OCR
+            RobustLandRecordOCRDocTR = _OCR
         ocr_processor = RobustLandRecordOCRDocTR()
         print("OCR processor initialized successfully!")
     return ocr_processor

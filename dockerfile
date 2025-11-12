@@ -23,8 +23,7 @@ RUN python -m playwright install --with-deps chromium
 # Copy app
 COPY . .
 
-# Expose the port provided by Render via $PORT (gunicorn.conf.py uses it)
-ENV PORT=10000
+# Render will inject PORT; gunicorn.conf.py reads it. Do not hardcode PORT.
 
 # Start the Flask app with gunicorn
 CMD ["gunicorn", "-c", "gunicorn.conf.py", "main:app"]

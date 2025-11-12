@@ -220,11 +220,42 @@ class IGRSubzoneScraper:
     def __enter__(self):
         print('[Method2] Starting Playwright...')
         self.playwright = sync_playwright().start()
-        self.browser = self.playwright.chromium.launch(headless=self.headless,
-                                                       slow_mo=200,
-                                                       args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-extensions'])
+        # Launch Chromium with low-memory flags suitable for small containers
+        chromium_args = [
+            '--no-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-background-timer-throttling',
+            '--disable-breakpad',
+            '--disable-client-side-phishing-detection',
+            '--disable-default-apps',
+            '--disable-features=SitePerProcess,TranslateUI',
+            '--disable-hang-monitor',
+            '--disable-ipc-flooding-protection',
+            '--disable-notifications',
+            '--no-zygote',
+            '--single-process',
+            '--renderer-process-limit=1',
+            '--js-flags=--max-old-space-size=128',
+        ]
+        self.browser = self.playwright.chromium.launch(
+            headless=self.headless,
+            args=chromium_args,
+        )
         self.page = self.browser.new_page()
-        self.page.set_default_timeout(30000)
+        # Block heavy resources to reduce CPU/memory
+        try:
+            self.page.route("**/*", lambda route: route.abort() if route.request.resource_type in {"image","font","media","stylesheet"} else route.continue_())
+        except Exception:
+            pass
+        # Set conservative timeouts
+        self.page.set_default_timeout(20000)
+        try:
+            self.page.set_default_navigation_timeout(30000)
+        except Exception:
+            pass
         return self
 
     def __exit__(self, exc_type, exc, tb):
