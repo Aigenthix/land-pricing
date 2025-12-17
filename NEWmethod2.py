@@ -208,7 +208,7 @@ def extract_admin_and_surveys_from_docx(file_bytes: bytes) -> Tuple[Optional[str
 # ----------------------
 
 class IGRSubzoneScraper:
-    def __init__(self, headless: bool = True, progress_cb: Optional[Callable[[str], None]] = None):
+    def __init__(self, headless: bool = False, progress_cb: Optional[Callable[[str], None]] = None):
         self.headless = headless
         self.progress_cb = progress_cb
         self.playwright = None
@@ -220,10 +220,27 @@ class IGRSubzoneScraper:
     def __enter__(self):
         print('[Method2] Starting Playwright...')
         self.playwright = sync_playwright().start()
-        self.browser = self.playwright.chromium.launch(headless=self.headless,
-                                                       slow_mo=200,
-                                                       args=['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--disable-extensions'])
-        self.page = self.browser.new_page()
+        self.browser = self.playwright.chromium.launch(
+            headless=self.headless,
+            slow_mo=200,
+            args=[
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-extensions',
+                '--lang=en-IN'                     # 👈 force Chromium language
+            ]
+        )
+
+        context = self.browser.new_context(
+            locale='en-IN',                        # 👈 navigator.language
+            extra_http_headers={
+                'Accept-Language': 'en-IN,en;q=0.9'  # 👈 server-side language
+            }
+        )
+
+        self.page = context.new_page()
+
         self.page.set_default_timeout(30000)
         return self
 
@@ -1221,5 +1238,5 @@ def process_igr_from_doc(file_bytes: bytes, filename: str, year_label: str, dist
     if not district or not taluka or not village or not surveys:
         return {"error": "Could not extract district/taluka/village/surveys from the document"}
 
-    with IGRSubzoneScraper(headless=True, progress_cb=progress_cb) as scraper:
+    with IGRSubzoneScraper(headless=False, progress_cb=progress_cb) as scraper:
         return scraper.run(district=district, year_label=year_label, taluka=taluka, village=village, surveys=surveys, translate_admin=False)
