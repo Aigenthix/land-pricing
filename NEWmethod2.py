@@ -704,7 +704,7 @@ class IGRSubzoneScraper:
         return False
 
     # --- Main flow ---
-    def run(self, district: str, year_label: str, taluka: str, village: str, surveys: List[str], translate_admin: bool = True) -> Dict:
+    def run(self, district: str, year_label: str, taluka: str, village: str, surveys: List[str], translate_admin: bool = True, _retry_depth: int = 0) -> Dict:
         # Navigate with district param (use English name in URL via translation)
         self._emit_status('Navigating IGR')
         district_param = _translate_to_en(district) if translate_admin else district
@@ -852,7 +852,11 @@ class IGRSubzoneScraper:
                     self.page.wait_for_selector('textarea', timeout=30000)
                 except Exception:
                     pass
-                # Poll for up to ~30s until textarea value is non-empty and changed
+                # Poll for up to ~30s until textarea value is non-empty.
+                # For the very first use (no prev_value), we only require that
+                # it becomes non-empty. For subsequent rows we additionally
+                # require that the value changes from prev_value so that we
+                # don't mistakenly reuse stale content from the previous row.
                 val = ''
                 for _ in range(60):
                     try:
@@ -864,9 +868,19 @@ class IGRSubzoneScraper:
                         val = self.page.locator('textarea').first.input_value()
                     except Exception:
                         val = ''
-                    if val and val.strip() and val != prev_value:
-                        break
-                    time.sleep(0.5)
+                    if not val or not val.strip():
+                        time.sleep(0.5)
+                        continue
+                    # If we have a previous value, wait until it actually
+                    # changes before accepting this row's textbox content.
+                    if prev_value and val == prev_value:
+                        time.sleep(0.5)
+                        continue
+                    break
+                # If we never got a non-empty value, or it never changed from
+                # prev_value when prev_value existed, treat as not matching.
+                if not val or not val.strip() or (prev_value and val == prev_value):
+                    return False, val or ''
                 vnorm = (val or '').replace(' ', '')
                 needed = [sv.replace(' ', '') for sv in surveys]
                 ok = all(sv in vnorm for sv in needed)
@@ -875,7 +889,37 @@ class IGRSubzoneScraper:
             # Iterate pages until found or exhausted
             current_page = 1
             prev_html = ctx_tbl.locator(results_table_sel).inner_html()
+            # Remember the URL of the SubZones view so we can detect if
+            # pagination kicks us to a different page under the same domain.
+            try:
+                subzones_page_url = self.page.url
+            except Exception:
+                subzones_page_url = None
             while True:
+                # If we somehow arrived on the map page (frmMap.aspx) between
+                # iterations (e.g. via a slow redirect), treat this as a
+                # kick-out and restart the flow once in the same tab.
+                try:
+                    _loop_url = self.page.url
+                except Exception:
+                    _loop_url = None
+                if _loop_url and 'frmMap.aspx' in _loop_url:
+                    print(f"[Method2] Detected frmMap.aspx at start of SubZones loop (url='{_loop_url}')")
+                    if _retry_depth < 1:
+                        print("[Method2] Restarting full IGR flow after frmMap redirect (same browser/tab) from loop start")
+                        return self.run(
+                            district=district,
+                            year_label=year_label,
+                            taluka=taluka,
+                            village=village,
+                            surveys=surveys,
+                            translate_admin=translate_admin,
+                            _retry_depth=_retry_depth + 1,
+                        )
+                    else:
+                        print("[Method2] frmMap redirect detected at loop start; max restart attempts reached")
+                        return {"error": "Repeated redirect to frmMap.aspx during SubZones pagination"}
+
                 # Small settle before processing a page (esp. first page)
                 time.sleep(1.2)
                 rows = _parse_rows()
@@ -948,9 +992,84 @@ class IGRSubzoneScraper:
                     # capture current first-row signature before navigation
                     pre_sig = _first_row_sig()
                     pager_link.first.click()
+                    # Explicitly detect redirect to the map page, which is a
+                    # known kick-out: https://igreval.maharashtra.gov.in/eASR2.0/frmMap.aspx
+                    curr_url_after_click = None
+                    for _ in range(20):  # poll URL for up to ~4s
+                        try:
+                            time.sleep(0.2)
+                            curr_url_after_click = self.page.url
+                        except Exception:
+                            curr_url_after_click = None
+                        if curr_url_after_click and 'frmMap.aspx' in curr_url_after_click:
+                            break
+                    if curr_url_after_click and 'frmMap.aspx' in curr_url_after_click:
+                        print(f"[Method2] Detected redirect to frmMap.aspx after pagination (url='{curr_url_after_click}')")
+                        # Restart the full flow once in the same tab by
+                        # navigating again and re-running run(). Guard with a
+                        # small retry depth to avoid infinite loops if the site
+                        # always redirects.
+                        if _retry_depth < 1:
+                            print("[Method2] Restarting full IGR flow after frmMap redirect (same browser/tab)")
+                            return self.run(
+                                district=district,
+                                year_label=year_label,
+                                taluka=taluka,
+                                village=village,
+                                surveys=surveys,
+                                translate_admin=translate_admin,
+                                _retry_depth=_retry_depth + 1,
+                            )
+                        else:
+                            print("[Method2] frmMap redirect occurred again; max restart attempts reached")
+                            return {"error": "Repeated redirect to frmMap.aspx during SubZones pagination"}
                 except Exception:
                     break
-                # Wait for grid to change
+                # After clicking the pager, ensure we are still on a view that
+                # contains the SubZones grid and still on the expected
+                # eASRCommon.aspx SubZones view. Occasionally the site
+                # redirects to a different page under the same domain.
+                try:
+                    new_ctx = None
+                    for _ in range(20):  # up to ~4s
+                        time.sleep(0.2)
+                        new_ctx = self._find_context_with_selector(results_table_sel)
+                        if new_ctx is not None:
+                            break
+                    # Also verify URL has not moved away from the expected
+                    # SubZones page (eASRCommon.aspx). If it has, treat it as a
+                    # redirect even if a table with the same id exists.
+                    try:
+                        current_url = self.page.url
+                    except Exception:
+                        current_url = None
+                    redirected_away = False
+                    if subzones_page_url and current_url:
+                        if 'eASRCommon.aspx' not in (current_url or ''):
+                            redirected_away = True
+                    # If either the grid context is missing or we detect a URL
+                    # redirect, attempt a single back navigation and short
+                    # re-probe. If that still fails, stop paginating but do not
+                    # abort the entire run.
+                    if new_ctx is None or redirected_away:
+                        try:
+                            self.page.go_back()
+                        except Exception:
+                            pass
+                        new_ctx = None
+                        for _ in range(20):  # up to ~4s
+                            time.sleep(0.2)
+                            new_ctx = self._find_context_with_selector(results_table_sel)
+                            if new_ctx is not None:
+                                break
+                        if new_ctx is None:
+                            print("[Method2] SubZones grid/URL could not be recovered after pagination; stopping further pagination")
+                            break
+                    ctx_tbl = new_ctx
+                except Exception:
+                    print("[Method2] Error while waiting for SubZones grid after pagination; stopping further pagination")
+                    break
+                # Wait for grid HTML to change
                 for _ in range(60):  # up to ~12s
                     time.sleep(0.2)
                     try:
@@ -966,6 +1085,17 @@ class IGRSubzoneScraper:
                     if sig and sig != pre_sig:
                         break
                     time.sleep(0.2)
+                # Re-parse rows on the new page; if there are no data rows with
+                # a SurveyNo link, it usually means we were kicked to a
+                # different view that happens to reuse the same table id. In
+                # that case, stop paginating but let the run finish cleanly.
+                try:
+                    rows_after = _parse_rows()
+                except Exception:
+                    rows_after = []
+                if not rows_after:
+                    print("[Method2] No SurveyNo rows found after SubZones pagination; stopping further pagination")
+                    break
                 time.sleep(1.2)
                 current_page = next_page
 
