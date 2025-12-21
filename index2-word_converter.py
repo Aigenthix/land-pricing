@@ -23,7 +23,7 @@ WORD_EXPORT_DIR = "index2/OCR_WORDexports"
 WORD_OUTPUT_FILE = os.path.join(WORD_EXPORT_DIR, "output.docx")
 
 # Model name is hardcoded per requirement
-GEMINI_MODEL_NAME = "models/gemini-2.5-pro"
+GEMINI_MODEL_NAME = "models/gemini-2.5-flash"
 
 
 def load_api_key():

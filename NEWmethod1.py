@@ -22,7 +22,7 @@ import google.generativeai as genai
 WORD_TEMPLATE_FILE = "index2/format.docx"
 
 # Model name is hardcoded to match index2-word_converter.py
-GEMINI_MODEL_NAME = "models/gemini-2.5-pro"
+GEMINI_MODEL_NAME = "models/gemini-2.5-flash"
 
 
 def load_api_key():

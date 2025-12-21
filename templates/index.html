@@ -357,6 +357,17 @@
         }
     });
 
+    function toggleMumbaiOptions() {
+        var mainCheckbox = document.getElementById('chkMumbaiRegion');
+        var optionsDiv = document.getElementById('mumbaiOptions');
+        if (!mainCheckbox || !optionsDiv) return;
+        if (mainCheckbox.checked) {
+            optionsDiv.style.display = 'block';
+        } else {
+            optionsDiv.style.display = 'none';
+        }
+    }
+
     async function compareRates() {
         console.log('Compare rates function called');
         
@@ -470,17 +481,80 @@
             sourceMethod = 'IGR Database';
         }
 
-        // Convert to hectares (1 hectare = 10,000 sq meters)
-        var ratePerHectare = recommendedRate * 10000;
+        // --- Optional Mumbai / Mumbai-Suburban adjustments ---
+        var adjustedRate = recommendedRate;
+        var adjustmentsApplied = [];
+
+        try {
+            var chkMumbaiRegion = document.getElementById('chkMumbaiRegion');
+            if (chkMumbaiRegion && chkMumbaiRegion.checked) {
+                // 1) Public Purpose (reduce by 20%)
+                var chkPublic = document.getElementById('chkPublicPurpose');
+                if (chkPublic && chkPublic.checked) {
+                    adjustedRate = adjustedRate * 0.8;
+                    adjustmentsApplied.push('Public Purpose (-20%)');
+                }
+
+                // 2) Bulk Land (reduce by 15%)
+                var chkBulk = document.getElementById('chkBulkLand');
+                if (chkBulk && chkBulk.checked) {
+                    adjustedRate = adjustedRate * 0.85;
+                    adjustmentsApplied.push('Bulk Land (-15%)');
+                }
+
+                // 3) Undulated / underdeveloped (custom depreciation %)
+                var chkUndulated = document.getElementById('chkUndulated');
+                var undulatedInput = document.getElementById('undulatedPercent');
+                if (chkUndulated && chkUndulated.checked) {
+                    if (!undulatedInput || !undulatedInput.value.trim()) {
+                        alert('Please enter depreciation percentage for undulated/underdeveloped land.');
+                        return;
+                    }
+                    var depPct = parseFloat(undulatedInput.value);
+                    if (isNaN(depPct) || depPct < 0) {
+                        alert('Please enter a valid non-negative percentage for depreciation.');
+                        return;
+                    }
+                    adjustedRate = adjustedRate * (1 - depPct / 100.0);
+                    adjustmentsApplied.push('Undulated/underdeveloped (-' + depPct.toFixed(2) + '%)');
+                }
+
+                // 4) TDR (Mumbai / Mumbai Sub-urban)
+                var chkTdr = document.getElementById('chkTdr');
+                var tdrSelect = document.getElementById('tdrRegion');
+                if (chkTdr && chkTdr.checked) {
+                    if (!tdrSelect || !tdrSelect.value) {
+                        alert('Please select TDR region (Mumbai or Mumbai Sub-urban).');
+                        return;
+                    }
+                    if (tdrSelect.value === 'mumbai') {
+                        adjustedRate = adjustedRate * 1.25;
+                        adjustmentsApplied.push('TDR Mumbai (+25%)');
+                    } else if (tdrSelect.value === 'mumbai_suburban') {
+                        adjustedRate = adjustedRate * 1.40;
+                        adjustmentsApplied.push('TDR Mumbai Sub-urban (+40%)');
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Error applying Mumbai adjustments:', e);
+        }
+
+        // Convert to hectares (1 hectare = 10,000 sq meters) using final adjusted rate
+        var ratePerHectare = adjustedRate * 10000;
 
         analysisHtml += '<hr>';
         analysisHtml += '<div style="background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 10px 0;">';
         analysisHtml += '<h4 style="color: #28a745; margin-top: 0;">Recommended Rate:</h4>';
         analysisHtml += '<p>Based on our analysis, we recommend the following rate for this land:</p>';
         analysisHtml += '<p><strong>Source:</strong> ' + sourceMethod + '</p>';
-        analysisHtml += '<p><strong>Rate per Square Meter:</strong> Rs. ' + recommendedRate.toFixed(2) + '</p>';
-        analysisHtml += '<p><strong>Rate per Hectare:</strong> Rs. ' + ratePerHectare.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '</p>';
-        analysisHtml += '<p style="font-style: italic; color: #666; margin-top: 10px;">This recommendation is based on comprehensive analysis of available data.</p>';
+        analysisHtml += '<p><strong>Base Rate per Square Meter:</strong> Rs. ' + recommendedRate.toFixed(2) + '</p>';
+        if (adjustmentsApplied.length > 0) {
+            analysisHtml += '<p><strong>Adjustments Applied:</strong> ' + adjustmentsApplied.join(', ') + '</p>';
+        }
+        analysisHtml += '<p><strong>Final Recommended Rate per Square Meter:</strong> Rs. ' + adjustedRate.toFixed(2) + '</p>';
+        analysisHtml += '<p><strong>Final Recommended Rate per Hectare:</strong> Rs. ' + ratePerHectare.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '</p>';
+        analysisHtml += '<p style="font-style: italic; color: #666; margin-top: 10px;">This recommendation is based on comprehensive analysis of available data and selected adjustments.</p>';
         analysisHtml += '</div>';
 
         resultsDiv.innerHTML = analysisHtml;
@@ -891,6 +965,47 @@
             <h3>Rate Recommendation (दर शिफारस)</h3>
             <p>Get our recommended land rate based on the analysis from available methods.</p>
             <p>उपलब्ध पद्धतींच्या विश्लेषणावर आधारित आमची शिफारस केलेली जमीन दर मिळवा.</p>
+        </div>
+        <div class="form-group" style="margin-top: 10px;">
+            <label>
+                Does this land belong to Mumbai or Mumbai-Suburban regions?
+                <input type="checkbox" id="chkMumbaiRegion" onclick="toggleMumbaiOptions()">
+            </label>
+            <div id="mumbaiOptions" style="display:none; margin-top: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; background-color:#f9f9f9;">
+                <div style="margin-bottom:8px;">
+                    <label>
+                        Is this land reserved for Public Purpose?
+                        <input type="checkbox" id="chkPublicPurpose">
+                    </label>
+                </div>
+                <div style="margin-bottom:8px;">
+                    <label>
+                        Is the land a bulk land?
+                        <input type="checkbox" id="chkBulkLand">
+                    </label>
+                </div>
+                <div style="margin-bottom:8px;">
+                    <label>
+                        Is the land undulated or underdeveloped?
+                        <input type="checkbox" id="chkUndulated">
+                    </label>
+                    <div style="margin-left:24px; margin-top:4px;">
+                        <label for="undulatedPercent" style="font-weight:normal;">Depreciation amount (%)</label>
+                        <input type="number" id="undulatedPercent" min="0" step="0.01" style="width:120px; padding:4px; margin-left:6px;">
+                    </div>
+                </div>
+                <div style="margin-bottom:4px;">
+                    <label>
+                        TDR
+                        <input type="checkbox" id="chkTdr">
+                    </label>
+                    <select id="tdrRegion" style="margin-left:8px; padding:4px;">
+                        <option value="">-- Select Region --</option>
+                        <option value="mumbai">Mumbai</option>
+                        <option value="mumbai_suburban">Mumbai Sub-urban</option>
+                    </select>
+                </div>
+            </div>
         </div>
         <div class="form-group">
             <button type="button" id="compareRatesButton" onclick="compareRates()">Get Recommended Rate (शिफारस केलेला दर मिळवा)</button>
