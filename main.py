@@ -186,6 +186,11 @@ def process_index2():
 
         return jsonify({"status": "success", "html": html, "download": bool(tmp_docx_path), "rate_avg": method1_rate_avg})
     except Exception as e:
+        try:
+            import traceback
+            traceback.print_exc()
+        except Exception:
+            pass
         processing_status["index2_progress"] = {"step": 0, "message": f"Error: {str(e)}"}
         return jsonify({"status": "error", "message": str(e)}), 500
 
