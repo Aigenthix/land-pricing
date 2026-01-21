@@ -488,21 +488,19 @@
         try {
             var chkMumbaiRegion = document.getElementById('chkMumbaiRegion');
             if (chkMumbaiRegion && chkMumbaiRegion.checked) {
-                // 1) Public Purpose (reduce by 20%)
+                // Sum all depreciation percentages first
+                var totalDepPct = 0.0;
+
                 var chkPublic = document.getElementById('chkPublicPurpose');
                 if (chkPublic && chkPublic.checked) {
-                    adjustedRate = adjustedRate * 0.8;
-                    adjustmentsApplied.push('Public Purpose (-20%)');
+                    totalDepPct += 20.0;
                 }
 
-                // 2) Bulk Land (reduce by 15%)
                 var chkBulk = document.getElementById('chkBulkLand');
                 if (chkBulk && chkBulk.checked) {
-                    adjustedRate = adjustedRate * 0.85;
-                    adjustmentsApplied.push('Bulk Land (-15%)');
+                    totalDepPct += 15.0;
                 }
 
-                // 3) Undulated / underdeveloped (custom depreciation %)
                 var chkUndulated = document.getElementById('chkUndulated');
                 var undulatedInput = document.getElementById('undulatedPercent');
                 if (chkUndulated && chkUndulated.checked) {
@@ -515,11 +513,15 @@
                         alert('Please enter a valid non-negative percentage for depreciation.');
                         return;
                     }
-                    adjustedRate = adjustedRate * (1 - depPct / 100.0);
-                    adjustmentsApplied.push('Undulated/underdeveloped (-' + depPct.toFixed(2) + '%)');
+                    totalDepPct += depPct;
                 }
 
-                // 4) TDR (Mumbai / Mumbai Sub-urban)
+                if (totalDepPct > 0) {
+                    adjustedRate = adjustedRate * (1 - totalDepPct / 100.0);
+                    adjustmentsApplied.push('Total Depreciation (-' + totalDepPct.toFixed(2) + '%)');
+                }
+
+                // Apply appreciation after depreciation (TDR)
                 var chkTdr = document.getElementById('chkTdr');
                 var tdrSelect = document.getElementById('tdrRegion');
                 if (chkTdr && chkTdr.checked) {
@@ -527,12 +529,16 @@
                         alert('Please select TDR region (Mumbai or Mumbai Sub-urban).');
                         return;
                     }
+                    var apprPct = 0.0;
                     if (tdrSelect.value === 'mumbai') {
-                        adjustedRate = adjustedRate * 1.25;
+                        apprPct = 25.0;
                         adjustmentsApplied.push('TDR Mumbai (+25%)');
                     } else if (tdrSelect.value === 'mumbai_suburban') {
-                        adjustedRate = adjustedRate * 1.40;
+                        apprPct = 40.0;
                         adjustmentsApplied.push('TDR Mumbai Sub-urban (+40%)');
+                    }
+                    if (apprPct > 0) {
+                        adjustedRate = adjustedRate * (1 + apprPct / 100.0);
                     }
                 }
             }
@@ -884,6 +890,10 @@
             <div class="form-group">
                 <label>Upload Index-II PDF (पीडीएफ अपलोड करा)</label>
                 <input type="file" name="input_file" accept=".pdf" required>
+            </div>
+            <div class="form-group">
+                <label>Select Base Date (मूलभूत तारीख निवडा)</label>
+                <input type="date" name="base_date" required>
             </div>
             <div class="form-group">
                 <button type="submit" id="processButton">Process Index-II (प्रक्रिया)</button>

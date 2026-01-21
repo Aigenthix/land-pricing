@@ -146,7 +146,8 @@ def process_index2():
         # Step 1: Detecting values using OCR (Gemini extract)
         processing_status["index2_progress"] = {"step": 1, "message": "Detecting values using OCR"}
         pdf_bytes = pdf_file.read()
-        html, tmp_docx_path = process_index2_pdf_to_html(pdf_bytes)
+        base_date_str = request.form.get('base_date')
+        html, tmp_docx_path = process_index2_pdf_to_html(pdf_bytes, base_date_str)
 
         # Step 2: Filtering relevant details (done inside NEWmethod1)
         processing_status["index2_progress"] = {"step": 2, "message": "Filtering relevant details"}

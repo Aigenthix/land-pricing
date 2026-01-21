@@ -22,7 +22,7 @@ import google.generativeai as genai
 WORD_TEMPLATE_FILE = "index2/format.docx"
 
 # Model name is hardcoded to match index2-word_converter.py
-GEMINI_MODEL_NAME = "models/gemini-2.5-flash"
+GEMINI_MODEL_NAME = "models/gemini-2.5-pro"
 
 
 def load_api_key():
@@ -262,7 +262,7 @@ def _date_in_range(s: str, start_dt: datetime, end_dt: datetime) -> bool:
         return False
 
 
-def _build_followup_tables(doc: Document, visual_header: List[str], all_rows: List[List[str]]) -> Dict[str, List[List[str]]]:
+def _build_followup_tables(doc: Document, visual_header: List[str], all_rows: List[List[str]], start_dt: Optional[datetime] = None, end_dt: Optional[datetime] = None) -> Dict[str, List[List[str]]]:
     """Re-implements future_filter_and_aggregate() without input(), with temporary rules.
     Returns dict with keys: base_table, filtered_table, derived_table, top_table, and paragraphs list.
     """
@@ -293,18 +293,13 @@ def _build_followup_tables(doc: Document, visual_header: List[str], all_rows: Li
         if len(r) > max(idx_prakar, idx_rate_sqm) and r[idx_prakar] == 'बिनशेती जमिन'
     ]
 
-    #! TEMP CHANGE: Use fixed date range instead of input() prompts (will remove later)
-    # 14/06/2018 to 13/06/2021
-    start_dt = datetime.strptime("14/06/2018", "%d/%m/%Y")
-    end_dt = datetime.strptime("13/06/2021", "%d/%m/%Y")
-    filtered_in_range = []
-    for r in filtered:
-        if _date_in_range(r[idx_reg_date], start_dt, end_dt):
-            filtered_in_range.append(r)
-    filtered = filtered_in_range
-
-    # TEMP CHANGE: remove SN == 8 globally before any downstream computations
-    filtered = [r for r in filtered if str(r[idx_serial]).strip() != '8']
+    # Apply date range filter if provided by caller
+    if start_dt and end_dt:
+        filtered_in_range = []
+        for r in filtered:
+            if _date_in_range(r[idx_reg_date], start_dt, end_dt):
+                filtered_in_range.append(r)
+        filtered = filtered_in_range
 
     # Sort by '(11) Rate per SqM' desc and keep top 50% (round up)
     filtered.sort(key=lambda r: _to_float(r[idx_rate_sqm]), reverse=True)
@@ -430,7 +425,7 @@ def _render_tables_as_html(base_header: List[str], base_rows: List[List[str]], f
     return "\n".join(html_parts)
 
 
-def process_index2_pdf_to_html(pdf_bytes: bytes) -> Tuple[str, Optional[str]]:
+def process_index2_pdf_to_html(pdf_bytes: bytes, base_date_str: Optional[str] = None) -> Tuple[str, Optional[str]]:
     """Public entry point used by Flask route.
     - Extract records with Gemini
     - Build python-docx document using template (for layout parity)
@@ -446,8 +441,21 @@ def process_index2_pdf_to_html(pdf_bytes: bytes) -> Tuple[str, Optional[str]]:
     # Base table
     base_header, base_rows = _build_base_table_docx(doc, records)
 
-    # Follow-up tables (no input(), fixed dates, and removing व्यवहार क्र. == 8 in second table)
-    followup = _build_followup_tables(doc, visual_header=base_header, all_rows=base_rows)
+    # Compute date range from provided base date string (HTML input type=date => YYYY-MM-DD)
+    start_dt = None
+    end_dt = None
+    if base_date_str:
+        try:
+            base_dt = datetime.strptime(base_date_str.strip(), "%Y-%m-%d")
+            # Use the previous 3 years, skipping the last 1 year window: [base-4y, base-1y]
+            start_dt = datetime(base_dt.year - 4, base_dt.month, base_dt.day)
+            end_dt = datetime(base_dt.year - 1, base_dt.month, base_dt.day)
+        except Exception:
+            start_dt = None
+            end_dt = None
+
+    # Follow-up tables with optional date range
+    followup = _build_followup_tables(doc, visual_header=base_header, all_rows=base_rows, start_dt=start_dt, end_dt=end_dt)
 
     # Render to HTML with current page styles
     html = _render_tables_as_html(base_header, base_rows, followup)
