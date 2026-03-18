@@ -65,9 +65,8 @@ def get_multipage_extraction_prompt():
         by 10,000. If it is already 'चौ.मीटर', use the value directly. Return only the
         final numerical value in Square Meters.
     -   `stamp_duty`: The value for '(12)बाजारभावाप्रमाणे मुद्रांक शुल्क'.
-    -   `prakar`: Analyze the text in section '(4) भू-मापन...' and related context. If it contains
-        the Marathi word 'सदनिका' or mentions चौ.फूट, set `prakar` to 'सदनिका'. Otherwise set it to
-        'बिनशेती जमिन'.
+    -   `prakar`: Extract the EXACT text written in section '(1) विलेखाचा प्रकार'. Copy the
+        text as-is from that section. Do not classify or modify it.
     -   `amount`: The value for '(2) मोबदला'. Return only the numeric value (no currency symbols).
 
     Return ONLY the JSON array and nothing else.
@@ -262,12 +261,13 @@ def _date_in_range(s: str, start_dt: datetime, end_dt: datetime) -> bool:
         return False
 
 
-def _build_followup_tables(doc: Document, visual_header: List[str], all_rows: List[List[str]], start_dt: Optional[datetime] = None, end_dt: Optional[datetime] = None) -> Dict[str, List[List[str]]]:
-    """Re-implements future_filter_and_aggregate() without input(), with temporary rules.
-    Returns dict with keys: base_table, filtered_table, derived_table, top_table, and paragraphs list.
+def _build_followup_tables(doc: Document, visual_header: List[str], selected_rows: List[List[str]], start_dt: Optional[datetime] = None, end_dt: Optional[datetime] = None) -> Dict[str, List[List[str]]]:
+    """Build the follow-up tables from user-selected rows.
+    The manual prakar filter has already been applied (user selected rows via checkboxes).
+    This function applies the date filter, then sorts, takes top 50%, and averages.
+    Returns dict with keys: filtered_table, derived_table, top_table, avg_paragraph.
     """
     # Column index mapping using the same kept_headers definition
-    # Use fixed indices matching the value order inserted in the base table
     idx_serial = 0
     idx_year = 1
     idx_subreg = 2
@@ -284,14 +284,8 @@ def _build_followup_tables(doc: Document, visual_header: List[str], all_rows: Li
     idx_prakar = 13
     idx_amount = 14
 
-    # Data rows start after first 3 rows: title, header, numbers row
-    data_rows = all_rows
-
-    # Filter by 'प्रकार' == 'बिनशेती जमिन'
-    filtered = [
-        r for r in data_rows
-        if len(r) > max(idx_prakar, idx_rate_sqm) and r[idx_prakar] == 'बिनशेती जमिन'
-    ]
+    # Start with user-selected rows (prakar filter already applied manually)
+    filtered = list(selected_rows)
 
     # Apply date range filter if provided by caller
     if start_dt and end_dt:
@@ -308,13 +302,12 @@ def _build_followup_tables(doc: Document, visual_header: List[str], all_rows: Li
     top_half = filtered[:keep_n]
 
     # Insert a heading and a new table for filtered rows (Second table)
-    doc.add_paragraph("बिनशेती जमिन - फिल्टर केलेले")
+    doc.add_paragraph("फिल्टर केलेले")
     new_table = doc.add_table(rows=1, cols=len(visual_header))
     new_table.style = doc.tables[0].style
     for c_idx, text in enumerate(visual_header):
         new_table.rows[0].cells[c_idx].text = text
 
-    # Rows already exclude SN 8 above
     for r in filtered:
         cells = new_table.add_row().cells
         for c_idx, text in enumerate(r[:len(visual_header)]):
@@ -334,7 +327,7 @@ def _build_followup_tables(doc: Document, visual_header: List[str], all_rows: Li
         idx_doc_type   # Document Type
     ]
 
-    doc.add_paragraph("बिनशेती जमिन - निवडक स्तंभ व नवीन 'दर प्रती चौ.मी.' सह")
+    doc.add_paragraph("निवडक स्तंभ व नवीन 'दर प्रती चौ.मी.' सह")
     derived_header = [visual_header[i] for i in derived_indices] + ["दर प्रती चौ.मी."]
     derived_table = doc.add_table(rows=1, cols=len(derived_header))
     derived_table.style = doc.tables[0].style
@@ -362,7 +355,7 @@ def _build_followup_tables(doc: Document, visual_header: List[str], all_rows: Li
     keep_n2 = max(1, math.ceil(n2 * 0.5)) if n2 > 0 else 0
     top_half_rows = derived_rows[:keep_n2]
 
-    doc.add_paragraph("बिनशेती जमिन - टॉप 50% (नवीन 'दर प्रती चौ.मी.' नुसार)")
+    doc.add_paragraph("टॉप 50% (नवीन 'दर प्रती चौ.मी.' नुसार)")
     top_header = derived_header
     top_table = doc.add_table(rows=1, cols=len(top_header))
     top_table.style = doc.tables[0].style
@@ -391,46 +384,57 @@ def _build_followup_tables(doc: Document, visual_header: List[str], all_rows: Li
     }
 
 
-def _render_tables_as_html(base_header: List[str], base_rows: List[List[str]], followup: Dict[str, List[List[str]]]) -> str:
-    """Render Word-like tables into HTML preserving existing page styling.
-    Uses class 'data' so current CSS in templates/index.html applies.
+def _render_table_html(rows: List[List[str]]) -> str:
+    """Render a list-of-lists table into an HTML <table class='data'>."""
+    if not rows:
+        return ""
+    head_html = "<thead><tr>" + "".join(f"<th>{pd.isna(h) and '' or h}</th>" for h in rows[0]) + "</tr></thead>"
+    body_rows = rows[1:] if len(rows) > 1 else []
+    body_html = "<tbody>" + "".join(
+        "<tr>" + "".join(f"<td>{pd.isna(c) and '' or c}</td>" for c in r) + "</tr>" for r in body_rows
+    ) + "</tbody>"
+    return f"<table class=\"data\">{head_html}{body_html}</table>"
+
+
+def _render_checkbox_table_html(header: List[str], rows: List[List[str]]) -> str:
+    """Render a table with a checkbox column for user selection.
+    Each row gets a checkbox; the first column (serial number) is used as value.
     """
-    def render_table(rows: List[List[str]]):
-        if not rows:
-            return ""
-        head_html = "<thead><tr>" + "".join(f"<th>{pd.isna(h) and '' or h}</th>" for h in rows[0]) + "</tr></thead>"
-        body_rows = rows[1:] if len(rows) > 1 else []
-        body_html = "<tbody>" + "".join(
-            "<tr>" + "".join(f"<td>{pd.isna(c) and '' or c}</td>" for c in r) + "</tr>" for r in body_rows
-        ) + "</tbody>"
-        return f"<table class=\"data\">{head_html}{body_html}</table>"
+    if not rows:
+        return "<p>No records to display.</p>"
+    # Header with checkbox column
+    head_html = "<thead><tr><th>Select</th>" + "".join(f"<th>{pd.isna(h) and '' or h}</th>" for h in header) + "</tr></thead>"
+    # Body rows with checkboxes
+    body_parts = []
+    for idx, r in enumerate(rows):
+        checkbox = f'<input type="checkbox" class="prakar-row-checkbox" data-row-index="{idx}" checked>'
+        cells = "".join(f"<td>{pd.isna(c) and '' or c}</td>" for c in r)
+        body_parts.append(f"<tr><td style='text-align:center'>{checkbox}</td>{cells}</tr>")
+    body_html = "<tbody>" + "".join(body_parts) + "</tbody>"
+    return f"<table class=\"data\">{head_html}{body_html}</table>"
 
-    # Build the base table (header + rows)
-    base_rows_all = [base_header] + base_rows
+
+def _render_followup_tables_as_html(followup: Dict[str, List[List[str]]]) -> str:
+    """Render the follow-up tables (after manual selection) into HTML."""
     html_parts = []
-    html_parts.append("<h3>Index-II Extracted Records</h3>")
-    html_parts.append(render_table(base_rows_all))
 
-    # Follow-up tables
-    html_parts.append("<h3>बिनशेती जमिन - फिल्टर केलेले</h3>")
-    html_parts.append(render_table(followup.get("filtered_table", [])))
+    html_parts.append("<h3>फिल्टर केलेले</h3>")
+    html_parts.append(_render_table_html(followup.get("filtered_table", [])))
 
-    html_parts.append("<h3>बिनशेती जमिन - निवडक स्तंभ व नवीन 'दर प्रती चौ.मी.' सह</h3>")
-    html_parts.append(render_table(followup.get("derived_table", [])))
+    html_parts.append("<h3>निवडक स्तंभ व नवीन 'दर प्रती चौ.मी.' सह</h3>")
+    html_parts.append(_render_table_html(followup.get("derived_table", [])))
 
-    html_parts.append("<h3>बिनशेती जमिन - टॉप 50% (नवीन 'दर प्रती चौ.मी.' नुसार)</h3>")
-    html_parts.append(render_table(followup.get("top_table", [])))
+    html_parts.append("<h3>टॉप 50% (नवीन 'दर प्रती चौ.मी.' नुसार)</h3>")
+    html_parts.append(_render_table_html(followup.get("top_table", [])))
 
     html_parts.append(f"<p><strong>{followup.get('avg_paragraph','')}</strong></p>")
     return "\n".join(html_parts)
 
 
-def process_index2_pdf_to_html(pdf_bytes: bytes, base_date_str: Optional[str] = None) -> Tuple[str, Optional[str]]:
-    """Public entry point used by Flask route.
-    - Extract records with Gemini
-    - Build python-docx document using template (for layout parity)
-    - Reproduce the same tables into HTML for the frontend
-    - No CSV is written; Word is not saved to disk
+def process_index2_pdf_step1(pdf_bytes: bytes) -> Tuple[str, List[str], List[List[str]]]:
+    """Step 1: Extract records from PDF and build the base table + checkbox table HTML.
+    Returns (step1_html, base_header, base_rows).
+    The step1_html includes the base table and a checkbox table for manual prakar filtering.
     """
     # Extract records
     records = _records_from_pdf_bytes(pdf_bytes)
@@ -441,26 +445,69 @@ def process_index2_pdf_to_html(pdf_bytes: bytes, base_date_str: Optional[str] = 
     # Base table
     base_header, base_rows = _build_base_table_docx(doc, records)
 
-    # Compute date range from provided base date string (HTML input type=date => YYYY-MM-DD)
+    # Build step 1 HTML: base table + instruction + checkbox table
+    base_rows_all = [base_header] + base_rows
+    html_parts = []
+    html_parts.append("<h3>Index-II Extracted Records</h3>")
+    html_parts.append(_render_table_html(base_rows_all))
+
+    # Instruction and checkbox table for manual prakar selection
+    html_parts.append("<h3>प्रकार फिल्टर (Prakar Filter)</h3>")
+    html_parts.append("<p>Check the boxes of the rows you want to keep and then click Proceed. "
+                      "(जे रो ठेवायचे आहेत त्यांच्या बॉक्सेस तपासा आणि पुढे जा बटण दाबा.)</p>")
+    html_parts.append('<div id="prakarCheckboxTable">')
+    html_parts.append(_render_checkbox_table_html(base_header, base_rows))
+    html_parts.append('</div>')
+    html_parts.append('<button type="button" id="prakarProceedBtn" onclick="submitPrakarSelection()" '
+                      'style="background-color:#28a745;color:white;border:none;padding:10px 20px;'
+                      'border-radius:5px;cursor:pointer;margin-top:10px;">'
+                      'Proceed (पुढे जा)</button>')
+
+    step1_html = "\n".join(html_parts)
+    return step1_html, base_header, base_rows
+
+
+def process_index2_pdf_step2(base_header: List[str], base_rows: List[List[str]],
+                              selected_indices: List[int],
+                              base_date_str: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    """Step 2: Apply the remaining pipeline to user-selected rows.
+    Returns (final_html, tmp_docx_path).
+    """
+    # Get the selected rows
+    selected_rows = [base_rows[i] for i in selected_indices if i < len(base_rows)]
+
+    # Compute date range from provided base date string
     start_dt = None
     end_dt = None
     if base_date_str:
         try:
             base_dt = datetime.strptime(base_date_str.strip(), "%Y-%m-%d")
-            # Use the previous 3 years, skipping the last 1 year window: [base-4y, base-1y]
             start_dt = datetime(base_dt.year - 4, base_dt.month, base_dt.day)
             end_dt = datetime(base_dt.year - 1, base_dt.month, base_dt.day)
         except Exception:
             start_dt = None
             end_dt = None
 
-    # Follow-up tables with optional date range
-    followup = _build_followup_tables(doc, visual_header=base_header, all_rows=base_rows, start_dt=start_dt, end_dt=end_dt)
+    # Build docx for the follow-up tables
+    doc = Document(WORD_TEMPLATE_FILE)
+    # Re-add the base table into the docx for completeness
+    table = doc.tables[0]
+    for r in base_rows:
+        cells = table.add_row().cells
+        for i, val in enumerate(r):
+            if i < len(cells):
+                cells[i].text = val
+    add_table_borders(table)
 
-    # Render to HTML with current page styles
-    html = _render_tables_as_html(base_header, base_rows, followup)
+    # Follow-up tables with selected rows and optional date range
+    followup = _build_followup_tables(doc, visual_header=base_header,
+                                       selected_rows=selected_rows,
+                                       start_dt=start_dt, end_dt=end_dt)
 
-    # Save DOCX to temp for download (requested by user)
+    # Render follow-up tables to HTML
+    html = _render_followup_tables_as_html(followup)
+
+    # Save DOCX to temp for download
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp_doc:

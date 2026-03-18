@@ -151,7 +151,7 @@
         document.body.removeChild(link);
     }
 
-    // AJAX form submission for Method 1 (Index2 Analysis)
+    // AJAX form submission for Method 1 (Index2 Analysis) - STEP 1
     function submitMethod1(event) {
         event.preventDefault();
         
@@ -185,45 +185,32 @@
             .catch(() => {});
         }, 500);
         
-        // New endpoint for Index2 PDF processing
+        // Step 1: Upload PDF and get base table + checkbox table
         fetch('/process_index2', {
             method: 'POST',
             body: formData
         })
         .then(response => response.json())
         .then(data => {
+            try { clearInterval(poll); } catch(e) {}
             if (data.status === 'success') {
-                // Stop backend polling and simulate final quick steps on UI
-                try { clearInterval(poll); } catch(e) {}
                 const resultsDiv = document.querySelector('#Method1 .results');
                 const dlBtn = document.getElementById('downloadIndex2Docx');
 
-                // Keep spinner visible during simulated steps
+                // Step 1 done: show base table + checkbox table
                 const runSimulatedSteps = async () => {
-                    // Step: Filtering relevant details
-                    progressText.textContent = 'Filtering relevant details';
+                    progressText.textContent = 'Extracting records...';
                     spinner.classList.remove('hidden');
-                    await new Promise(r => setTimeout(r, 1200));
-
-                    // Step: Calculating Land Price
-                    progressText.textContent = 'Calculating Land Price';
-                    await new Promise(r => setTimeout(r, 1200));
-
-                    // Step: Done (briefly)
-                    progressText.textContent = 'Done';
-                    spinner.classList.add('hidden');
                     await new Promise(r => setTimeout(r, 800));
 
-                    // Now render tables and finalize UI
+                    progressText.textContent = 'Done';
+                    spinner.classList.add('hidden');
+                    await new Promise(r => setTimeout(r, 500));
+
+                    // Render step 1 HTML (base table + checkbox table with Proceed button)
                     resultsDiv.innerHTML = data.html || '<p>No output generated.</p>';
                     progressWrap.style.display = 'none';
-
-                    if (data.download) {
-                        dlBtn.style.display = 'inline-block';
-                        dlBtn.onclick = () => { window.location = '/download_index2_docx'; };
-                    } else {
-                        dlBtn.style.display = 'none';
-                    }
+                    dlBtn.style.display = 'none';
                 };
 
                 runSimulatedSteps();
@@ -236,10 +223,105 @@
             alert('An error occurred while processing the document.');
         })
         .finally(() => {
-            // Reset form state
             processButton.disabled = false;
             processingMessage.style.display = 'none';
             spinner.classList.add('hidden');
+        });
+    }
+
+    // STEP 2: User clicks Proceed after selecting rows
+    function submitPrakarSelection() {
+        const checkboxes = document.querySelectorAll('.prakar-row-checkbox');
+        const selectedIndices = [];
+        checkboxes.forEach(cb => {
+            if (cb.checked) {
+                selectedIndices.push(parseInt(cb.getAttribute('data-row-index')));
+            }
+        });
+
+        if (selectedIndices.length === 0) {
+            alert('Please select at least one row to proceed. (कृपया पुढे जाण्यासाठी किमान एक रो निवडा.)');
+            return;
+        }
+
+        const resultsDiv = document.querySelector('#Method1 .results');
+        const dlBtn = document.getElementById('downloadIndex2Docx');
+        const progressWrap = document.getElementById('index2Progress');
+        const progressText = document.getElementById('index2StepText');
+        const spinner = document.getElementById('index2Spinner');
+
+        // Show processing state
+        progressWrap.style.display = 'block';
+        progressText.textContent = 'Filtering and calculating...';
+        spinner.classList.remove('hidden');
+
+        // Disable the proceed button
+        const proceedBtn = document.getElementById('prakarProceedBtn');
+        if (proceedBtn) proceedBtn.disabled = true;
+
+        fetch('/process_index2_step2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ selected_indices: selectedIndices })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                const runFinalSteps = async () => {
+                    progressText.textContent = 'Filtering relevant details';
+                    spinner.classList.remove('hidden');
+                    await new Promise(r => setTimeout(r, 1000));
+
+                    progressText.textContent = 'Calculating Land Price';
+                    await new Promise(r => setTimeout(r, 1000));
+
+                    progressText.textContent = 'Done';
+                    spinner.classList.add('hidden');
+                    await new Promise(r => setTimeout(r, 500));
+
+                    // Append step 2 results below existing content
+                    // Remove the checkbox table and proceed button, keep base table
+                    const checkboxTableDiv = document.getElementById('prakarCheckboxTable');
+                    if (checkboxTableDiv) checkboxTableDiv.remove();
+                    const proceedBtn = document.getElementById('prakarProceedBtn');
+                    if (proceedBtn) proceedBtn.remove();
+                    // Remove the instruction paragraph (the one before the checkbox table)
+                    const prakarHeaders = resultsDiv.querySelectorAll('h3');
+                    prakarHeaders.forEach(h => {
+                        if (h.textContent.includes('Prakar Filter') || h.textContent.includes('प्रकार फिल्टर')) {
+                            // Remove the instruction paragraph after it
+                            let next = h.nextElementSibling;
+                            if (next && next.tagName === 'P') next.remove();
+                            h.remove();
+                        }
+                    });
+
+                    // Append follow-up tables
+                    resultsDiv.innerHTML += data.html;
+                    progressWrap.style.display = 'none';
+
+                    if (data.download) {
+                        dlBtn.style.display = 'inline-block';
+                        dlBtn.onclick = () => { window.location = '/download_index2_docx'; };
+                    } else {
+                        dlBtn.style.display = 'none';
+                    }
+                };
+
+                runFinalSteps();
+            } else {
+                alert('Error: ' + data.message);
+                progressWrap.style.display = 'none';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while processing the selection.');
+            progressWrap.style.display = 'none';
+        })
+        .finally(() => {
+            spinner.classList.add('hidden');
+            if (proceedBtn) proceedBtn.disabled = false;
         });
     }
 

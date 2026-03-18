@@ -8,7 +8,7 @@ import threading
 import time
 import tempfile
 from Fin_plsplspls import RobustLandRecordOCRDocTR
-from NEWmethod1 import process_index2_pdf_to_html
+from NEWmethod1 import process_index2_pdf_step1, process_index2_pdf_step2
 from NEWmethod2 import process_igr_from_doc
 
 load_dotenv()
@@ -147,45 +147,17 @@ def process_index2():
         processing_status["index2_progress"] = {"step": 1, "message": "Detecting values using OCR"}
         pdf_bytes = pdf_file.read()
         base_date_str = request.form.get('base_date')
-        html, tmp_docx_path = process_index2_pdf_to_html(pdf_bytes, base_date_str)
+        step1_html, base_header, base_rows = process_index2_pdf_step1(pdf_bytes)
 
-        # Step 2: Filtering relevant details (done inside NEWmethod1)
-        processing_status["index2_progress"] = {"step": 2, "message": "Filtering relevant details"}
+        # Store intermediate data in session for step 2
+        session['index2_base_header'] = base_header
+        session['index2_base_rows'] = base_rows
+        session['index2_base_date'] = base_date_str
 
-        # Step 3: Calculating Land Price (rates and averages)
-        processing_status["index2_progress"] = {"step": 3, "message": "Calculating Land Price"}
-
-        # Store results
-        session['method1_index2_html'] = html
-        session['method1_index2_docx_path'] = tmp_docx_path
-        # Extract and store average rate from HTML for Tab 3 recommendation
-        method1_rate_avg = None
-        try:
-            # Try multiple patterns in HTML
-            m = re.search(r"Average\s*दर[^=]*=\s*([\d,]+\.?\d*)", html)
-            if not m:
-                m = re.search(r"Rs?\.?\s*([\d,]+\.?\d*)\/-?\s*per\s*sq\.?\s*m", html, re.IGNORECASE)
-            if not m:
-                m = re.search(r"रु\.?\s*([\d,]+\.?\d*)\/-?\s*प्रती\s*चौ\.?\s*मी\.", html)
-            if not m:
-                # as a last resort, pick the largest number-like token
-                nums = re.findall(r"[\d,]+\.?\d*", html)
-                nums_f = [float(x.replace(',', '')) for x in nums if x and x[0].isdigit()]
-                if nums_f:
-                    method1_rate_avg = max(nums_f)
-                else:
-                    method1_rate_avg = None
-            else:
-                method1_rate_avg = float(m.group(1).replace(',', ''))
-        except Exception:
-            method1_rate_avg = None
-        if method1_rate_avg is not None:
-            session['method1_rate_avg'] = method1_rate_avg
-
-        # Step 4: Done
+        # Step 2: Done with step 1
         processing_status["index2_progress"] = {"step": 4, "message": "Done"}
 
-        return jsonify({"status": "success", "html": html, "download": bool(tmp_docx_path), "rate_avg": method1_rate_avg})
+        return jsonify({"status": "success", "html": step1_html, "needs_selection": True})
     except Exception as e:
         try:
             import traceback
@@ -193,6 +165,67 @@ def process_index2():
         except Exception:
             pass
         processing_status["index2_progress"] = {"step": 0, "message": f"Error: {str(e)}"}
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/process_index2_step2', methods=['POST'])
+def process_index2_step2():
+    """Step 2 of Index2 processing: receives user-selected row indices, applies remaining pipeline."""
+    if not session.get('logged_in'):
+        return jsonify({"status": "error", "message": "Not logged in"}), 401
+
+    try:
+        data = request.get_json()
+        if not data or 'selected_indices' not in data:
+            return jsonify({"status": "error", "message": "No row selection provided"}), 400
+
+        selected_indices = data['selected_indices']
+        base_header = session.get('index2_base_header')
+        base_rows = session.get('index2_base_rows')
+        base_date_str = session.get('index2_base_date')
+
+        if not base_header or not base_rows:
+            return jsonify({"status": "error", "message": "No step 1 data found. Please re-upload the PDF."}), 400
+
+        html, tmp_docx_path = process_index2_pdf_step2(
+            base_header, base_rows, selected_indices, base_date_str
+        )
+
+        # Store results
+        session['method1_index2_html'] = html
+        session['method1_index2_docx_path'] = tmp_docx_path
+
+        # Extract and store average rate from HTML for Tab 3 recommendation
+        method1_rate_avg = None
+        try:
+            m = re.search(r"Average\s*\u0926\u0930[^=]*=\s*([\d,]+\.?\d*)", html)
+            if not m:
+                m = re.search(r"Rs?\.?\s*([\d,]+\.?\d*)\/\-?\s*per\s*sq\.?\s*m", html, re.IGNORECASE)
+            if not m:
+                m = re.search(r"\u0930\u0941\.?\s*([\d,]+\.?\d*)\/\-?\s*\u092a\u094d\u0930\u0924\u0940\s*\u091a\u094c\.?\s*\u092e\u0940\.", html)
+            if not m:
+                nums = re.findall(r"[\d,]+\.?\d*", html)
+                nums_f = [float(x.replace(',', '')) for x in nums if x and x[0].isdigit()]
+                if nums_f:
+                    method1_rate_avg = max(nums_f)
+            else:
+                method1_rate_avg = float(m.group(1).replace(',', ''))
+        except Exception:
+            method1_rate_avg = None
+        if method1_rate_avg is not None:
+            session['method1_rate_avg'] = method1_rate_avg
+
+        return jsonify({
+            "status": "success",
+            "html": html,
+            "download": bool(tmp_docx_path),
+            "rate_avg": method1_rate_avg
+        })
+    except Exception as e:
+        try:
+            import traceback
+            traceback.print_exc()
+        except Exception:
+            pass
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/get_index2_progress')
