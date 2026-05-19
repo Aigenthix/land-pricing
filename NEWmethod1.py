@@ -230,8 +230,10 @@ def _build_base_table_docx(doc: Document, records: List[Dict]) -> Tuple[List[str
         ]
         cells = table.add_row().cells
         for i, val in enumerate(values):
+            str_val = str(val) if val is not None else ""
             if i < len(cells):
-                cells[i].text = val
+                cells[i].text = str_val
+            values[i] = str_val
         rows_for_html.append(values)
         serial_number += 1
 
@@ -496,7 +498,7 @@ def process_index2_pdf_step2(base_header: List[str], base_rows: List[List[str]],
         cells = table.add_row().cells
         for i, val in enumerate(r):
             if i < len(cells):
-                cells[i].text = val
+                cells[i].text = str(val) if val is not None else ""
     add_table_borders(table)
 
     # Follow-up tables with selected rows and optional date range
