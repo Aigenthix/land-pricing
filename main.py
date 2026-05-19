@@ -179,6 +179,7 @@ def process_index2_step2():
             return jsonify({"status": "error", "message": "No row selection provided"}), 400
 
         selected_indices = data['selected_indices']
+        shera_values = data.get('shera_values', {})
         base_header = session.get('index2_base_header')
         base_rows = session.get('index2_base_rows')
         base_date_str = session.get('index2_base_date')
@@ -187,7 +188,7 @@ def process_index2_step2():
             return jsonify({"status": "error", "message": "No step 1 data found. Please re-upload the PDF."}), 400
 
         html, tmp_docx_path = process_index2_pdf_step2(
-            base_header, base_rows, selected_indices, base_date_str
+            base_header, base_rows, selected_indices, shera_values, base_date_str
         )
 
         # Store results

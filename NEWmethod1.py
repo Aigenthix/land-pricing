@@ -65,8 +65,6 @@ def get_multipage_extraction_prompt():
         by 10,000. If it is already 'चौ.मीटर', use the value directly. Return only the
         final numerical value in Square Meters.
     -   `stamp_duty`: The value for '(12)बाजारभावाप्रमाणे मुद्रांक शुल्क'.
-    -   `prakar`: Extract the EXACT text written in section '(1) विलेखाचा प्रकार'. Copy the
-        text as-is from that section. Do not classify or modify it.
     -   `amount`: The value for '(2) मोबदला'. Return only the numeric value (no currency symbols).
 
     Return ONLY the JSON array and nothing else.
@@ -225,8 +223,8 @@ def _build_base_table_docx(doc: Document, records: List[Dict]) -> Tuple[List[str
             rec["rate_per_sqm"],                    # 10 Rate per SqM
             rec["rate_per_guntha"],                 # 11 Rate per Guntha
             rec["rate_per_ha"],                     # 12 Rate per Ha
-            rec.get("prakar", "N/A"),              # 13 प्रकार
-            rec.get("amount", "")                  # 14 Amount
+            rec.get("amount", ""),                  # 13 Amount
+            ""                                      # 14 (Reserved for Shera)
         ]
         cells = table.add_row().cells
         for i, val in enumerate(values):
@@ -283,8 +281,8 @@ def _build_followup_tables(doc: Document, visual_header: List[str], selected_row
     idx_rate_sqm = 10
     idx_rate_guntha = 11
     idx_rate_ha = 12
-    idx_prakar = 13
-    idx_amount = 14
+    idx_amount = 13
+    idx_shera = 14
 
     # Start with user-selected rows (prakar filter already applied manually)
     filtered = list(selected_rows)
@@ -325,7 +323,6 @@ def _build_followup_tables(doc: Document, visual_header: List[str], selected_row
         idx_dast,      # Dast Kramank
         idx_reg_date,  # Registration Date
         idx_amount,    # Amount
-        idx_prakar,    # प्रकार
         idx_doc_type   # Document Type
     ]
 
@@ -407,11 +404,29 @@ def _render_checkbox_table_html(header: List[str], rows: List[List[str]]) -> str
     # Header with checkbox column
     head_html = "<thead><tr><th>Select</th>" + "".join(f"<th>{pd.isna(h) and '' or h}</th>" for h in header) + "</tr></thead>"
     # Body rows with checkboxes
+    options = [
+        "",
+        "बिनशेती स्वरूपाचा व्यवहार",
+        "सदनिकेचा व्यवहार",
+        "शून्य दरचा व्यवहार",
+        "वाजवी दरापेक्षा कमी दराचा व्यवहार",
+        "वाजवी दरापेक्षा जास्त दराचा व्यवहार",
+        "शासकीय स्वरूपाचा व्यवहार",
+        "बांधकामासहीत केलेला व्यवहार"
+    ]
+    opts_html = "".join(f'<option value="{opt}">{opt}</option>' for opt in options)
+
     body_parts = []
     for idx, r in enumerate(rows):
-        checkbox = f'<input type="checkbox" class="prakar-row-checkbox" data-row-index="{idx}" checked>'
-        cells = "".join(f"<td>{pd.isna(c) and '' or c}</td>" for c in r)
-        body_parts.append(f"<tr><td style='text-align:center'>{checkbox}</td>{cells}</tr>")
+        checkbox = f'<input type="checkbox" class="prakar-row-checkbox" data-row-index="{idx}" checked onchange="document.getElementById(\'shera-dropdown-{idx}\').disabled = this.checked;">'
+        cells_html = ""
+        for c_idx, c in enumerate(r):
+            if c_idx == 14:
+                # generate dropdown for Shera
+                cells_html += f'<td><select class="shera-dropdown" id="shera-dropdown-{idx}" disabled>{opts_html}</select></td>'
+            else:
+                cells_html += f"<td>{pd.isna(c) and '' or c}</td>"
+        body_parts.append(f"<tr><td style='text-align:center'>{checkbox}</td>{cells_html}</tr>")
     body_html = "<tbody>" + "".join(body_parts) + "</tbody>"
     return f"<table class=\"data\">{head_html}{body_html}</table>"
 
@@ -471,12 +486,20 @@ def process_index2_pdf_step1(pdf_bytes: bytes) -> Tuple[str, List[str], List[Lis
 
 def process_index2_pdf_step2(base_header: List[str], base_rows: List[List[str]],
                               selected_indices: List[int],
+                              shera_values: Dict[str, str],
                               base_date_str: Optional[str] = None) -> Tuple[str, Optional[str]]:
     """Step 2: Apply the remaining pipeline to user-selected rows.
     Returns (final_html, tmp_docx_path).
     """
-    # Get the selected rows
-    selected_rows = [base_rows[i] for i in selected_indices if i < len(base_rows)]
+    # Get the selected rows and update Shera column for all rows
+    selected_rows = []
+    for i, r in enumerate(base_rows):
+        if i in selected_indices:
+            r[14] = "स्वीकृत व्यवहार"
+            selected_rows.append(r)
+        else:
+            val = shera_values.get(str(i), "")
+            r[14] = val if val else "कारण दिले नाही"
 
     # Compute date range from provided base date string
     start_dt = None

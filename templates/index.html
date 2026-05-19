@@ -233,9 +233,15 @@
     function submitPrakarSelection() {
         const checkboxes = document.querySelectorAll('.prakar-row-checkbox');
         const selectedIndices = [];
+        const sheraValues = {};
+        
         checkboxes.forEach(cb => {
+            const rowIndex = parseInt(cb.getAttribute('data-row-index'));
             if (cb.checked) {
-                selectedIndices.push(parseInt(cb.getAttribute('data-row-index')));
+                selectedIndices.push(rowIndex);
+            } else {
+                const dropdown = document.getElementById('shera-dropdown-' + rowIndex);
+                sheraValues[rowIndex] = dropdown ? dropdown.value : "";
             }
         });
 
@@ -262,7 +268,7 @@
         fetch('/process_index2_step2', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ selected_indices: selectedIndices })
+            body: JSON.stringify({ selected_indices: selectedIndices, shera_values: sheraValues })
         })
         .then(response => response.json())
         .then(data => {
