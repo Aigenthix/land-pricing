@@ -59,11 +59,7 @@ def get_multipage_extraction_prompt():
     -   `document_type`: The value for '(1)विलेखाचा प्रकार'.
     -   `survey_number`: All the numbers inside the double parentheses `((...))` from section (4),
         like 'Survey Number'. Some numbers can have parts to them (for example 1ब, 2ब)
-    -   `area_sq_meter`: The value for '(5)क्षेत्रफळ'. VERY IMPORTANT: If the unit is
-        'चौ.फुट' (Square Feet) or 'चौ. फूट', convert it to Square Meters by multiplying by
-        0.092903. If the unit is 'हेक्टर' (Hectare), convert to Square Meters by multiplying
-        by 10,000. If it is already 'चौ.मीटर', use the value directly. Return only the
-        final numerical value in Square Meters.
+    -   `area_sq_meter`: The value for '(5)क्षेत्रफळ'. VERY IMPORTANT: First, try to extract the area from '(5)क्षेत्रफळ'. If the value is 0, missing, or empty, you MUST read the text in section '(4) भू-मापन, पोटहिस्सा...'. When reading section (4), look for the absolute largest parent plot area mentioned before the fraction or share breakdown. Specifically, look for phrases like "एकूण क्षेत्रफळ" (Total Area) or the number immediately preceding the word "पैकी" (which means 'out of'). Do NOT extract the smaller fractional share. Convert units if necessary: 'चौ.फुट'*0.092903, 'हेक्टर'*10000. If 'चौ.मीटर' or 'चौ.मी', use directly. Return only the final numerical value.
     -   `stamp_duty`: The value for '(12)बाजारभावाप्रमाणे मुद्रांक शुल्क'.
     -   `amount`: The value for '(2) मोबदला'. Return only the numeric value (no currency symbols).
 
