@@ -234,6 +234,7 @@
         const checkboxes = document.querySelectorAll('.prakar-row-checkbox');
         const selectedIndices = [];
         const sheraValues = {};
+        let missingShera = false;
         
         checkboxes.forEach(cb => {
             const rowIndex = parseInt(cb.getAttribute('data-row-index'));
@@ -241,9 +242,17 @@
                 selectedIndices.push(rowIndex);
             } else {
                 const dropdown = document.getElementById('shera-dropdown-' + rowIndex);
+                if (!dropdown || !dropdown.value) {
+                    missingShera = true;
+                }
                 sheraValues[rowIndex] = dropdown ? dropdown.value : "";
             }
         });
+
+        if (missingShera) {
+            alert('Please select a reason (Shera) for all unselected rows. (कृपया सर्व नाकारलेल्या ओळींसाठी कारण निवडा.)');
+            return;
+        }
 
         if (selectedIndices.length === 0) {
             alert('Please select at least one row to proceed. (कृपया पुढे जाण्यासाठी किमान एक रो निवडा.)');

@@ -170,7 +170,7 @@ def _records_from_pdf_bytes(pdf_bytes: bytes) -> List[Dict]:
         survey_norm = normalize_survey_numbers(data.get("survey_number"))
 
         hectares = area_sqm / 10000 if area_sqm > 0 else 0
-        rate_per_sqm = stamp_duty / area_sqm if area_sqm > 0 else 0
+        rate_per_sqm = amount / area_sqm if area_sqm > 0 else 0
         rate_per_guntha = rate_per_sqm * 100 if rate_per_sqm > 0 else 0
         rate_per_ha = rate_per_sqm * 10000 if rate_per_sqm > 0 else 0
 
@@ -414,12 +414,12 @@ def _render_checkbox_table_html(header: List[str], rows: List[List[str]]) -> str
 
     body_parts = []
     for idx, r in enumerate(rows):
-        checkbox = f'<input type="checkbox" class="prakar-row-checkbox" data-row-index="{idx}" checked onchange="document.getElementById(\'shera-dropdown-{idx}\').disabled = this.checked;">'
+        checkbox = f'<input type="checkbox" class="prakar-row-checkbox" data-row-index="{idx}" checked onchange="document.getElementById(\'shera-dropdown-{idx}\').disabled = this.checked; document.getElementById(\'shera-star-{idx}\').style.display = this.checked ? \'none\' : \'inline\';">'
         cells_html = ""
         for c_idx, c in enumerate(r):
             if c_idx == 14:
                 # generate dropdown for Shera
-                cells_html += f'<td><select class="shera-dropdown" id="shera-dropdown-{idx}" disabled>{opts_html}</select></td>'
+                cells_html += f'<td><select class="shera-dropdown" id="shera-dropdown-{idx}" disabled>{opts_html}</select><span id="shera-star-{idx}" style="color:red; display:none; margin-left:4px; font-weight:bold;">*</span></td>'
             else:
                 cells_html += f"<td>{pd.isna(c) and '' or c}</td>"
         body_parts.append(f"<tr><td style='text-align:center'>{checkbox}</td>{cells_html}</tr>")
@@ -503,8 +503,8 @@ def process_index2_pdf_step2(base_header: List[str], base_rows: List[List[str]],
     if base_date_str:
         try:
             base_dt = datetime.strptime(base_date_str.strip(), "%Y-%m-%d")
-            start_dt = datetime(base_dt.year - 4, base_dt.month, base_dt.day)
-            end_dt = datetime(base_dt.year - 1, base_dt.month, base_dt.day)
+            start_dt = datetime(base_dt.year - 3, base_dt.month, base_dt.day)
+            end_dt = datetime(base_dt.year, base_dt.month, base_dt.day)
         except Exception:
             start_dt = None
             end_dt = None
