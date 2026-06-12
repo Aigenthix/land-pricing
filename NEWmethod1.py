@@ -284,27 +284,35 @@ def _build_followup_tables(doc: Document, visual_header: List[str], selected_row
     filtered = list(selected_rows)
 
     # Apply date range filter if provided by caller
+    filtered_by_date = list(filtered)
     if start_dt and end_dt:
         filtered_in_range = []
         for r in filtered:
             if _date_in_range(r[idx_reg_date], start_dt, end_dt):
                 filtered_in_range.append(r)
-        filtered = filtered_in_range
+        filtered_by_date = filtered_in_range
 
-    # Sort by '(11) Rate per SqM' desc and keep top 50% (round up)
-    filtered.sort(key=lambda r: _to_float(r[idx_rate_sqm]), reverse=True)
-    n = len(filtered)
-    keep_n = max(1, math.ceil(n * 0.5)) if n > 0 else 0
-    top_half = filtered[:keep_n]
+    # Table 2: Prakar Filtered (User selected rows)
+    doc.add_paragraph("प्रकार फिल्टर केलेले (User Selected Rows)")
+    prakar_table = doc.add_table(rows=1, cols=len(visual_header))
+    prakar_table.style = doc.tables[0].style
+    for c_idx, text in enumerate(visual_header):
+        prakar_table.rows[0].cells[c_idx].text = text
 
-    # Insert a heading and a new table for filtered rows (Second table)
-    doc.add_paragraph("फिल्टर केलेले")
+    for r in filtered:
+        cells = prakar_table.add_row().cells
+        for c_idx, text in enumerate(r[:len(visual_header)]):
+            cells[c_idx].text = text
+    add_table_borders(prakar_table)
+
+    # Table 3: Date Filtered (Second table)
+    doc.add_paragraph("दिनांक फिल्टर केलेले (Date Filtered)")
     new_table = doc.add_table(rows=1, cols=len(visual_header))
     new_table.style = doc.tables[0].style
     for c_idx, text in enumerate(visual_header):
         new_table.rows[0].cells[c_idx].text = text
 
-    for r in filtered:
+    for r in filtered_by_date:
         cells = new_table.add_row().cells
         for c_idx, text in enumerate(r[:len(visual_header)]):
             cells[c_idx].text = text
@@ -322,7 +330,7 @@ def _build_followup_tables(doc: Document, visual_header: List[str], selected_row
         idx_doc_type   # Document Type
     ]
 
-    doc.add_paragraph("निवडक स्तंभ व नवीन 'दर प्रती चौ.मी.' सह")
+    doc.add_paragraph("निवडक स्तंभ व नवीन 'दर प्रती चौ.मी.' सह (Leaner Table Sorted)")
     derived_header = [visual_header[i] for i in derived_indices] + ["दर प्रती चौ.मी."]
     derived_table = doc.add_table(rows=1, cols=len(derived_header))
     derived_table.style = doc.tables[0].style
@@ -335,17 +343,21 @@ def _build_followup_tables(doc: Document, visual_header: List[str], selected_row
         return (amt / area) if area > 0 else 0.0
 
     derived_rows = []
-    for r in filtered:
+    for r in filtered_by_date:
         rate = compute_rate(r)
         values = [r[i] if i < len(r) else "" for i in derived_indices]
+        derived_rows.append((values, rate))
+        
+    # Sort derived rows descending
+    derived_rows.sort(key=lambda t: t[1], reverse=True)
+
+    for values, rate in derived_rows:
         cells = derived_table.add_row().cells
         for c_idx, text in enumerate(values + [f"{rate:.2f}"]):
             cells[c_idx].text = text
-        derived_rows.append((values, rate))
     add_table_borders(derived_table)
 
     # Third: top 50% of derived by new rate
-    derived_rows.sort(key=lambda t: t[1], reverse=True)
     n2 = len(derived_rows)
     keep_n2 = max(1, math.ceil(n2 * 0.5)) if n2 > 0 else 0
     top_half_rows = derived_rows[:keep_n2]
@@ -368,15 +380,23 @@ def _build_followup_tables(doc: Document, visual_header: List[str], selected_row
     doc.add_paragraph(avg_paragraph)
 
     # Prepare structures for HTML rendering
-    def table_to_rows(t):
-        return [[cell.text for cell in row.cells] for row in t.rows]
+    # format rows properly to strings
+    top_html_rows = []
+    for values, rate in top_half_rows:
+        top_html_rows.append(values + [f"{rate:.2f}"])
+        
+    derived_html_rows = []
+    for values, rate in derived_rows:
+        derived_html_rows.append(values + [f"{rate:.2f}"])
 
     return {
-        "filtered_table": table_to_rows(new_table),
-        "derived_table": table_to_rows(derived_table),
-        "top_table": table_to_rows(top_table),
+        "prakar_filtered": [visual_header] + filtered,
+        "date_filtered": [visual_header] + filtered_by_date,
+        "derived_table": [derived_header] + derived_html_rows,
+        "top_table": [top_header] + top_html_rows,
         "avg_paragraph": avg_paragraph,
     }
+
 
 
 def _render_table_html(rows: List[List[str]]) -> str:
@@ -431,10 +451,13 @@ def _render_followup_tables_as_html(followup: Dict[str, List[List[str]]]) -> str
     """Render the follow-up tables (after manual selection) into HTML."""
     html_parts = []
 
-    html_parts.append("<h3>फिल्टर केलेले</h3>")
-    html_parts.append(_render_table_html(followup.get("filtered_table", [])))
+    html_parts.append("<h3>प्रकार फिल्टर केलेले (User Selected Rows)</h3>")
+    html_parts.append(_render_table_html(followup.get("prakar_filtered", [])))
 
-    html_parts.append("<h3>निवडक स्तंभ व नवीन 'दर प्रती चौ.मी.' सह</h3>")
+    html_parts.append("<h3>दिनांक फिल्टर केलेले (Date Filtered)</h3>")
+    html_parts.append(_render_table_html(followup.get("date_filtered", [])))
+
+    html_parts.append("<h3>निवडक स्तंभ व नवीन 'दर प्रती चौ.मी.' सह (Leaner Table Sorted)</h3>")
     html_parts.append(_render_table_html(followup.get("derived_table", [])))
 
     html_parts.append("<h3>टॉप 50% (नवीन 'दर प्रती चौ.मी.' नुसार)</h3>")
