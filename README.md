@@ -7,40 +7,43 @@ uv venv
 uv sync
 ```
 
-### 2. Create a `.env` file in the /root directory of the format below and enter the Gemini API key.
+### 2. Create a `.env` file in the /root directory of the format below and enter the Gemini API key
 ```
 GOOGLE_API_KEY=''
+SECRET_KEY=''  # optional
 ```
-- Input your API key between the quotes
+- Input your Google Gemini API key between the quotes
 
 ### 3. Install Playwright inside your venv
 ```bash
-source venv/bin/activate # this is for linux
+source .venv/bin/activate # linux/mac
+# or .venv\Scripts\activate on Windows
 playwright install
 ```
 
-### 4. After syncing and installing dependencies, you may run the application
+### 4. Run the application
 ```bash
 gunicorn --workers 1 --threads 2 --bind 0.0.0.0:5001 --timeout 120 main:app
+# Or for development: python main.py
 ```
-- This runs the app on port `5001`
-
+- Runs on `http://localhost:5001`
+- **Login Credentials:** Username: `admin` | Password: `5555`
 
 ## For DEMO
-### 1. In tab 1
-- In the input box, upload the file --> `index2/files/majiwada_index2.pdf`
-- This file contains the index documents for the *Village* = `Majivade`, *District* = `Thane`, *Taluka* = `Thane`
-- Using the gemini API key, it will do the OCR and make the table
+### 1. In Tab 1 (Index2 Analysis)
+- Upload the PDF: `index2/files/majiwada_index2.pdf`
+- Select a Base Date (e.g., `2024-03-31`)
+- Click **Process Index-II** (Gemini extracts Index-II records)
+- In the Prakar Filter table, review rows. Uncheck non-qualifying rows and select a Marathi Shera (reason)
+- Click **Proceed** to view date-filtered, sorted top 50% records, and average rate (download DOCX if needed)
 
-### 2. In Tab 2
-- Since we previously used the index documents for *Village* = `Majivade`, *District* = `Thane`, *Taluka* = `Thane`
-- Now, we upload the *11 notification* for the survey numbers we want to get the price on
-- Upload the `index2/11Notification.docx`
-- Enter the year we use (right now we are using `2023-2024` due to the same year being used for calculation of Tab 1)
-- Enter the district, taluka and village details
-- Click on Process
-- It processes and does all the matching and gives out the final output
+### 2. In Tab 2 (IGR Web Scraping)
+- Upload the Section 11 Notification: `index2/11Notification-new-majivade-extended.docx`
+- Select Year: `2023-2024`
+- Enter District: `Thane`, Taluka: `Thane`, Village: `Majiwade`
+- Click **Process**
+- The scraper automates the IGR eASR portal, matches Survey Numbers against SubZones, and returns the rate
 
-### 3. Tab 3
-- Click the button and show the answer
-
+### 3. In Tab 3 (Recommendation)
+- Select regional adjustment criteria (e.g., Mumbai/Mumbai-Suburban, Public Purpose, Bulk Land, TDR)
+- Click **Get Recommended Rate** to compare Method 1 vs Method 2 and get the final compensation rate
